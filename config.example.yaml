@@ -1,0 +1,90 @@
+# Copy to config.yaml and edit
+#
+# update_interval_minutes: Used by `run` loop OR Scheduled Task interval (recommended)
+update_interval_minutes: 30
+
+# Where to store images and logs
+output_dir: "out"
+
+# Network settings (optional). If you are behind a corporate proxy, set these.
+network:
+  https_proxy: ""
+  http_proxy: ""
+  timeout_s: 30
+
+# region.mode:
+# - local: fetch around your location
+# - country: fetch the whole country (useful for "国家云图")
+region:
+  mode: "local"  # local | country | globe
+  # Optional override when mode="country": [lat_min, lon_min, lat_max, lon_max]
+  # country_bbox_latlon: [18.0, 73.0, 54.0, 135.0]
+  # Optional override for resolver when mode="country"
+  # country_name: "China"
+
+  # globe mode: render an earth ball centered on your country or location.
+  # Requires Pillow.
+  globe_center: "country"  # country | location
+  globe_render_width: 1920
+  globe_render_height: 1080
+  globe_background_style: "gradient"  # solid | gradient
+  globe_background_rgb: [6, 16, 28]
+  globe_background_rgb2: [0, 0, 6]
+  globe_background_stars: true
+
+# Keep only recent outputs (by day folder name). With keep_days: 1, only today's images remain.
+retention:
+  keep_days: 1
+
+# Location: either set auto_location=true, or provide lat/lon
+auto_location: true
+location:
+  name: "Shanghai"
+  lat: 31.2304
+  lon: 121.4737
+
+# How much area to fetch around your location
+# Note: larger area == more bandwidth
+area:
+  half_width_km: 250
+  half_height_km: 140
+
+# Image output
+image:
+  width: 3840
+  height: 2160
+  format: "jpg"  # jpg or png
+  quality: 92
+
+# Satellite layer source
+# GIBS daily layers (try in order)
+# - VIIRS_SNPP_CorrectedReflectance_TrueColor (often good and recent)
+# - MODIS_Terra_CorrectedReflectance_TrueColor
+satellite:
+  provider: "gibs"  # gibs | himawari
+  layers:
+    - "VIIRS_SNPP_CorrectedReflectance_TrueColor"
+    - "MODIS_Terra_CorrectedReflectance_TrueColor"
+  max_days_back: 10
+
+  # Himawari direct full-disk (infrared cloud image works day+night)
+  himawari_product: "FULL_24h"
+  himawari_band: "B13"
+  # Resolution level: 1d=550, 2d=1100, 4d=2200, 8d=4400 (tiles stitched)
+  himawari_level_d: 8
+  himawari_max_lookback_minutes: 240
+
+# Wallpaper style: fill | fit | stretch | center | span
+wallpaper:
+  style: "fill"
+
+# Optional: draw a small overlay text
+overlay:
+  enabled: true
+  text_template: "{layer}  {date}  ({lat:.2f},{lon:.2f})"
+  position: "bottom-right"  # bottom-right | bottom-left | top-right | top-left
+  margin_px: 24
+  font_size_px: 28
+  fill_rgba: [255, 255, 255, 220]
+  stroke_rgba: [0, 0, 0, 180]
+  stroke_width_px: 3
