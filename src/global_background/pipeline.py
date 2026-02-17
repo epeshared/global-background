@@ -4,6 +4,7 @@ import datetime as dt
 import math
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from .config import AppConfig
 from .country_bbox import resolve_country_bbox_latlon
 from .globe import encode_image, make_background, render_orthographic_globe
 from .himawari import HimawariFullDiskRequest, fetch_latest_full_disk_png
+from .goes import GoesFullDiskRequest, fetch_latest_full_disk_jpg
 from .gibs import GibsRequest, fetch_wms_image_bytes, iter_recent_dates
 from .esri import EsriExportRequest, default_date as esri_date, default_label as esri_label, fetch_esri_world_imagery
 from .location import get_location_from_ip
@@ -97,87 +99,196 @@ def fetch_best_available(
     country_code: str | None = None,
     country_name: str | None = None,
 ) -> FetchResult:
-    if cfg.satellite.provider == "himawari":
-        # Direct full-disk download; ignores region/local bbox.
-        png, ts_utc, url = fetch_latest_full_disk_png(
-            HimawariFullDiskRequest(
-                product=cfg.satellite.himawari_product,
-                band=cfg.satellite.himawari_band,
-                level_d=int(cfg.satellite.himawari_level_d),
-            ),
-            timeout_s=float(cfg.network.timeout_s),
-            max_lookback_minutes=int(cfg.satellite.himawari_max_lookback_minutes),
-        )
-        # label by UTC timestamp
-        band = (cfg.satellite.himawari_band or "").strip()
-        if band:
-            label = f"HIMAWARI_{cfg.satellite.himawari_product}_{band}_{cfg.satellite.himawari_level_d}d"
-        else:
-            label = f"HIMAWARI_{cfg.satellite.himawari_product}_{cfg.satellite.himawari_level_d}d"
-        _ = url  # kept for potential logging later
+    last_exc: Exception | None = None
 
-        # If Pillow is available, transform the square full-disk image into the configured
-        # wallpaper size.
-        if Image is not None:
-            try:
-                img = Image.open(BytesIO(png)).convert("RGB")
-                img.load()
+    if cfg.satellite.provider == "goes":
+        if Image is None:
+            print(
+                "[global-background] Note: provider='goes' returns a square full-disk image. "
+                "Install Pillow to auto-crop/resize it to your screen (e.g. `python -m pip install -e .[full]`).",
+                file=sys.stderr,
+            )
+        try:
+            jpg, ts_utc, url = fetch_latest_full_disk_jpg(
+                GoesFullDiskRequest(
+                    satellite=cfg.satellite.goes_satellite,
+                    product=cfg.satellite.goes_product,
+                    size=int(cfg.satellite.goes_size),
+                ),
+                timeout_s=float(cfg.network.timeout_s),
+            )
 
-                src_w, src_h = img.size
-                target_w, target_h = int(cfg.image.width), int(cfg.image.height)
+            sat = (cfg.satellite.goes_satellite or "").strip().upper() or "GOES18"
+            product = (cfg.satellite.goes_product or "").strip().upper() or "GEOCOLOR"
+            label = f"GOES_{sat}_{product}_{int(cfg.satellite.goes_size)}"
+            _ = url  # kept for potential logging later
 
-                layout = (cfg.satellite.himawari_layout or "fill").strip().lower()
-                if layout == "fit":
-                    # Keep the full disk visible: scale-to-fit + letterbox with space background.
-                    bg = make_background(
-                        width=target_w,
-                        height=target_h,
-                        style=cfg.region.globe_background_style,
-                        rgb1=cfg.region.globe_background_rgb,
-                        rgb2=cfg.region.globe_background_rgb2,
-                        stars=cfg.region.globe_background_stars,
-                    )
-                    scale = min(target_w / max(1, src_w), target_h / max(1, src_h))
-                    new_w = max(1, int(round(src_w * scale)))
-                    new_h = max(1, int(round(src_h * scale)))
-                    fg = img.resize((new_w, new_h), resample=Image.LANCZOS)
-                    left = (target_w - new_w) // 2
-                    top = (target_h - new_h) // 2
-                    bg.paste(fg, (left, top))
-                    img = bg
-                else:
-                    # Fill the wallpaper: center-crop to aspect then resize.
-                    target_aspect = target_w / max(1, target_h)
-                    src_aspect = src_w / max(1, src_h)
+            # If Pillow is available, transform the square full-disk image into the configured
+            # wallpaper size.
+            if Image is not None:
+                try:
+                    img = Image.open(BytesIO(jpg)).convert("RGB")
+                    img.load()
 
-                    if abs(src_aspect - target_aspect) > 1e-6:
-                        if target_aspect > src_aspect:
-                            # Need a wider crop: reduce height.
-                            crop_h = int(round(src_w / target_aspect))
-                            crop_h = max(1, min(src_h, crop_h))
-                            top = (src_h - crop_h) // 2
-                            img = img.crop((0, top, src_w, top + crop_h))
-                        else:
-                            # Need a taller/narrower crop: reduce width.
-                            crop_w = int(round(src_h * target_aspect))
-                            crop_w = max(1, min(src_w, crop_w))
-                            left = (src_w - crop_w) // 2
-                            img = img.crop((left, 0, left + crop_w, src_h))
+                    src_w, src_h = img.size
+                    target_w, target_h = int(cfg.image.width), int(cfg.image.height)
 
-                    img = img.resize((target_w, target_h), resample=Image.LANCZOS)
+                    layout = (cfg.satellite.himawari_layout or "fill").strip().lower()
+                    if layout == "fit":
+                        bg = make_background(
+                            width=target_w,
+                            height=target_h,
+                            style=cfg.region.globe_background_style,
+                            rgb1=cfg.region.globe_background_rgb,
+                            rgb2=cfg.region.globe_background_rgb2,
+                            stars=cfg.region.globe_background_stars,
+                        )
+                        scale = min(target_w / max(1, src_w), target_h / max(1, src_h))
+                        scale *= float(getattr(cfg.satellite, "full_disk_scale", 1.0) or 1.0)
+                        new_w = max(1, int(round(src_w * scale)))
+                        new_h = max(1, int(round(src_h * scale)))
+                        fg = img.resize((new_w, new_h), resample=Image.LANCZOS)
+                        left = (target_w - new_w) // 2
+                        top = (target_h - new_h) // 2
+                        bg.paste(fg, (left, top))
+                        img = bg
+                    else:
+                        target_aspect = target_w / max(1, target_h)
+                        src_aspect = src_w / max(1, src_h)
 
-                buf = BytesIO()
-                if cfg.image.format in {"jpg", "jpeg"}:
-                    img.save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
-                    return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg")
-                else:
+                        if abs(src_aspect - target_aspect) > 1e-6:
+                            if target_aspect > src_aspect:
+                                crop_h = int(round(src_w / target_aspect))
+                                crop_h = max(1, min(src_h, crop_h))
+                                top = (src_h - crop_h) // 2
+                                img = img.crop((0, top, src_w, top + crop_h))
+                            else:
+                                crop_w = int(round(src_h * target_aspect))
+                                crop_w = max(1, min(src_w, crop_w))
+                                left = (src_w - crop_w) // 2
+                                img = img.crop((left, 0, left + crop_w, src_h))
+
+                        img = img.resize((target_w, target_h), resample=Image.LANCZOS)
+
+                    buf = BytesIO()
+                    if cfg.image.format in {"jpg", "jpeg"}:
+                        img.save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+                        return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg")
                     img.save(buf, format="PNG", optimize=True)
                     return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png")
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-        # Fallback: return the original payload as PNG.
-        return FetchResult(layer=label, date=ts_utc.date(), image_bytes=png, content_ext=".png")
+            # No Pillow: keep the original JPG.
+            return FetchResult(layer=label, date=ts_utc.date(), image_bytes=jpg, content_ext=".jpg")
+        except Exception as exc:
+            last_exc = exc
+            print(
+                "[global-background] GOES fetch failed; falling back to Himawari/GIBS/ESRI. "
+                f"Reason: {exc!r}",
+                file=sys.stderr,
+            )
+
+    if cfg.satellite.provider == "himawari":
+        if Image is None:
+            print(
+                "[global-background] Note: provider='himawari' returns a square full-disk image. "
+                "Install Pillow to auto-crop/resize it to your screen (e.g. `python -m pip install -e .[full]`).",
+                file=sys.stderr,
+            )
+        try:
+            # Direct full-disk download; ignores region/local bbox.
+            png, ts_utc, url = fetch_latest_full_disk_png(
+                HimawariFullDiskRequest(
+                    product=cfg.satellite.himawari_product,
+                    band=cfg.satellite.himawari_band,
+                    level_d=int(cfg.satellite.himawari_level_d),
+                ),
+                timeout_s=float(cfg.network.timeout_s),
+                max_lookback_minutes=int(cfg.satellite.himawari_max_lookback_minutes),
+            )
+            # label by UTC timestamp
+            band = (cfg.satellite.himawari_band or "").strip()
+            if band:
+                label = f"HIMAWARI_{cfg.satellite.himawari_product}_{band}_{cfg.satellite.himawari_level_d}d"
+            else:
+                label = f"HIMAWARI_{cfg.satellite.himawari_product}_{cfg.satellite.himawari_level_d}d"
+            _ = url  # kept for potential logging later
+
+            # If Pillow is available, transform the square full-disk image into the configured
+            # wallpaper size.
+            if Image is not None:
+                try:
+                    img = Image.open(BytesIO(png)).convert("RGB")
+                    img.load()
+
+                    src_w, src_h = img.size
+                    target_w, target_h = int(cfg.image.width), int(cfg.image.height)
+
+                    layout = (cfg.satellite.himawari_layout or "fill").strip().lower()
+                    if layout == "fit":
+                        # Keep the full disk visible: scale-to-fit + letterbox with space background.
+                        bg = make_background(
+                            width=target_w,
+                            height=target_h,
+                            style=cfg.region.globe_background_style,
+                            rgb1=cfg.region.globe_background_rgb,
+                            rgb2=cfg.region.globe_background_rgb2,
+                            stars=cfg.region.globe_background_stars,
+                        )
+                        scale = min(target_w / max(1, src_w), target_h / max(1, src_h))
+                        scale *= float(getattr(cfg.satellite, "full_disk_scale", 1.0) or 1.0)
+                        new_w = max(1, int(round(src_w * scale)))
+                        new_h = max(1, int(round(src_h * scale)))
+                        fg = img.resize((new_w, new_h), resample=Image.LANCZOS)
+                        left = (target_w - new_w) // 2
+                        top = (target_h - new_h) // 2
+                        bg.paste(fg, (left, top))
+                        img = bg
+                    else:
+                        # Fill the wallpaper: center-crop to aspect then resize.
+                        target_aspect = target_w / max(1, target_h)
+                        src_aspect = src_w / max(1, src_h)
+
+                        if abs(src_aspect - target_aspect) > 1e-6:
+                            if target_aspect > src_aspect:
+                                # Need a wider crop: reduce height.
+                                crop_h = int(round(src_w / target_aspect))
+                                crop_h = max(1, min(src_h, crop_h))
+                                top = (src_h - crop_h) // 2
+                                img = img.crop((0, top, src_w, top + crop_h))
+                            else:
+                                # Need a taller/narrower crop: reduce width.
+                                crop_w = int(round(src_h * target_aspect))
+                                crop_w = max(1, min(src_w, crop_w))
+                                left = (src_w - crop_w) // 2
+                                img = img.crop((left, 0, left + crop_w, src_h))
+
+                        img = img.resize((target_w, target_h), resample=Image.LANCZOS)
+
+                    buf = BytesIO()
+                    if cfg.image.format in {"jpg", "jpeg"}:
+                        img.save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+                        return FetchResult(
+                            layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg"
+                        )
+                    else:
+                        img.save(buf, format="PNG", optimize=True)
+                        return FetchResult(
+                            layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png"
+                        )
+                except Exception:
+                    pass
+
+            # Fallback: return the original payload as PNG.
+            return FetchResult(layer=label, date=ts_utc.date(), image_bytes=png, content_ext=".png")
+        except Exception as exc:
+            last_exc = exc
+            print(
+                "[global-background] Himawari fetch failed; falling back to GIBS/ESRI. "
+                f"Reason: {exc!r}",
+                file=sys.stderr,
+            )
 
     if cfg.region.mode == "globe":
         # Always fetch a global equirectangular map as the source for globe rendering.
@@ -192,8 +303,6 @@ def fetch_best_available(
             )
     else:
         bbox = _build_bbox(lat, lon, cfg.area.half_width_km, cfg.area.half_height_km)
-    last_exc: Exception | None = None
-
     for layer in cfg.satellite.layers:
         for date in iter_recent_dates(cfg.satellite.max_days_back):
             try:
@@ -304,7 +413,8 @@ def cleanup_old_days(output_dir: Path, keep_days: int) -> None:
 
 
 def run_once(cfg: AppConfig, dry_run: bool = False) -> None:
-    # Apply proxy settings (if provided) for urllib-based fetches.
+    # Apply proxy settings for urllib-based fetches.
+    # Priority: config.toml -> existing environment variables -> Windows system proxy (best-effort).
     if cfg.network.https_proxy:
         os.environ["HTTPS_PROXY"] = cfg.network.https_proxy
         os.environ["https_proxy"] = cfg.network.https_proxy
@@ -312,9 +422,42 @@ def run_once(cfg: AppConfig, dry_run: bool = False) -> None:
         os.environ["HTTP_PROXY"] = cfg.network.http_proxy
         os.environ["http_proxy"] = cfg.network.http_proxy
 
+    if (
+        not cfg.network.http_proxy
+        and not cfg.network.https_proxy
+        and not os.environ.get("HTTP_PROXY")
+        and not os.environ.get("HTTPS_PROXY")
+        and not os.environ.get("http_proxy")
+        and not os.environ.get("https_proxy")
+        and sys.platform.startswith("win")
+    ):
+        try:
+            from .winproxy import get_windows_proxy_settings
+
+            s = get_windows_proxy_settings()
+            if s is not None:
+                if s.http_proxy:
+                    os.environ["HTTP_PROXY"] = s.http_proxy
+                    os.environ["http_proxy"] = s.http_proxy
+                if s.https_proxy:
+                    os.environ["HTTPS_PROXY"] = s.https_proxy
+                    os.environ["https_proxy"] = s.https_proxy
+        except Exception:
+            pass
+
     geo = None
     if cfg.auto_location:
-        geo = get_location_from_ip()
+        try:
+            geo = get_location_from_ip(timeout_s=float(cfg.network.timeout_s))
+        except Exception as exc:
+            geo = None
+            print(
+                "[global-background] auto_location failed; falling back to configured location. "
+                f"Reason: {exc!r}",
+                file=sys.stderr,
+            )
+
+    if geo is not None:
         lat, lon = geo.lat, geo.lon
         place_name = geo.name or cfg.location.name
         cc = getattr(geo, "country_code", None)

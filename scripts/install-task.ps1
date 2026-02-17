@@ -10,25 +10,75 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $configAbs = Resolve-Path (Join-Path $repoRoot $ConfigPath)
 
-$pythonSource = $null
-if ($PythonExe -and (Test-Path $PythonExe)) {
-  $pythonSource = (Resolve-Path $PythonExe).Path
-} else {
-  $python = (Get-Command python -ErrorAction SilentlyContinue)
-  if (-not $python) {
-    throw "python not found in PATH. Install Python 3.11+ and ensure it's on PATH."
+function Test-PythonRunnable([string]$Candidate) {
+  try {
+    $exe = & $Candidate -c "import sys; print(sys.executable)" 2>$null
+    if (-not $exe) { return $null }
+    if ($exe -like "*WindowsApps*\\python.exe") { return $null }
+    return $exe
+  } catch {
+    return $null
   }
-  $pythonSource = $python.Source
 }
 
-# Validate python is runnable and not the Microsoft Store alias stub.
-$exe = & $pythonSource -c "import sys; print(sys.executable)" 2>$null
-if (-not $exe) {
-  throw "Python seems not runnable. If you see Microsoft Store popup, disable 'App execution aliases' for python.exe, or pass -PythonExe with the real python path."
+function Test-PythonHasPillow([string]$ExePath) {
+  try {
+    & $ExePath -c "import PIL" 1>$null 2>$null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
 }
-if ($exe -like "*WindowsApps*\\python.exe") {
-  throw "Detected Microsoft Store python alias ($exe). Install Python from python.org and disable App Execution Aliases, or pass -PythonExe with the real python.exe path."
+
+function Resolve-PythonExe([string]$Preferred) {
+  $resolved = @()
+  if ($Preferred -and (Test-Path $Preferred)) {
+    $exe0 = Test-PythonRunnable (Resolve-Path $Preferred).Path
+    if ($exe0) { $resolved += $exe0 }
+  }
+
+  $py = (Get-Command py -ErrorAction SilentlyContinue)
+  if ($py) {
+    foreach ($ver in @("-3.12", "-3.11", "-3")) {
+      try {
+        $exe = & py $ver -c "import sys; print(sys.executable)" 2>$null
+        if ($exe -and -not ($exe -like "*WindowsApps*\\python.exe")) {
+          $resolved += $exe.Trim()
+        }
+      } catch {
+        # ignore
+      }
+    }
+  }
+
+  $python = (Get-Command python -ErrorAction SilentlyContinue)
+  if ($python) {
+    $exe1 = Test-PythonRunnable $python.Source
+    if ($exe1) { $resolved += $exe1 }
+  }
+
+  $local312 = Join-Path $env:LocalAppData "Programs\Python\Python312\python.exe"
+  if (Test-Path $local312) {
+    $exe2 = Test-PythonRunnable $local312
+    if ($exe2) { $resolved += $exe2 }
+  }
+  $local311 = Join-Path $env:LocalAppData "Programs\Python\Python311\python.exe"
+  if (Test-Path $local311) {
+    $exe3 = Test-PythonRunnable $local311
+    if ($exe3) { $resolved += $exe3 }
+  }
+
+  $resolved = $resolved | Select-Object -Unique
+  if (-not $resolved -or $resolved.Count -eq 0) {
+    throw "python not found in PATH. Install Python 3.11+ and ensure it's on PATH."
+  }
+
+  foreach ($e in $resolved) {
+    if (Test-PythonHasPillow $e) { return $e }
+  }
+  return $resolved[0]
 }
+$exe = Resolve-PythonExe $PythonExe
 
 $pythonw = Join-Path (Split-Path $exe) "pythonw.exe"
 if (-not (Test-Path $pythonw)) {

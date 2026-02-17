@@ -8,6 +8,8 @@ from io import BytesIO
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .system_proxy import system_proxy_env_for_url
+
 
 HIMAWARI_DL_BASE = "https://himawari8-dl.nict.go.jp/himawari.asia/img"
 
@@ -27,10 +29,12 @@ class HimawariFullDiskRequest:
 
 def _download_tile_bytes(*, url: str, timeout_s: float) -> tuple[bytes, str]:
     http_req = Request(url, headers={"User-Agent": "global-background/0.1"})
-    with urlopen(http_req, timeout=timeout_s) as resp:
-        ctype = (resp.headers.get("Content-Type") or "").lower()
-        data = resp.read()
+    with system_proxy_env_for_url(http_req.full_url):
+        with urlopen(http_req, timeout=timeout_s) as resp:
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            data = resp.read()
     return data, ctype
+
 
 
 def _is_placeholder_tileset(*, corner: bytes, center: bytes) -> bool:
@@ -75,6 +79,11 @@ def fetch_latest_full_disk_png(
             if "image" not in ctype00:
                 raise RuntimeError(f"Unexpected content-type: {ctype00}")
 
+            # If a proxy replaces tiles with a tiny placeholder image or HTML->PNG wrapper,
+            # looking back in time won't help. Fail fast so callers can fall back.
+            if len(tile00) < 5_000:
+                raise RuntimeError(f"Himawari returned unexpectedly small tile payload ({len(tile00)} bytes)")
+
             if int(req.level_d) > 1:
                 d = int(req.level_d)
                 cx = d // 2
@@ -101,6 +110,15 @@ def fetch_latest_full_disk_png(
         except URLError as exc:
             last_exc = exc
         except Exception as exc:
+            # If we detect proxy placeholder behavior, don't keep probing older timestamps.
+            if isinstance(exc, RuntimeError):
+                msg = str(exc)
+                if (
+                    "blocked/replaced by a proxy placeholder" in msg
+                    or "unexpectedly small tile payload" in msg
+                    or "unexpectedly small payload" in msg
+                ):
+                    raise
             last_exc = exc
 
         cursor -= dt.timedelta(minutes=step_minutes)

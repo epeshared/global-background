@@ -1,4 +1,4 @@
-# Copy to config.toml and edit
+﻿# Copy to config.toml and edit
 
 update_interval_minutes = 30
 output_dir = "out"
@@ -15,7 +15,7 @@ timeout_s = 30
 
 [region]
 # local: use a bbox around (lat, lon)
-# country: use the whole country bbox (good for "国家云图")
+# country: use the whole country bbox (good for "鍥藉浜戝浘")
 mode = "local"  # local | country | globe
 # Optional override when mode="country". Format: [lat_min, lon_min, lat_max, lon_max]
 # country_bbox_latlon = [18.0, 73.0, 54.0, 135.0]
@@ -49,14 +49,11 @@ half_height_km = 140
 [image]
 width = 3840
 height = 2160
-# You can also set width/height to 0 (or "auto") to use your primary screen resolution.
-# width = 0
-# height = 0
 format = "jpg"   # jpg or png
 quality = 92
 
 [satellite]
-provider = "gibs"  # gibs | himawari | goes
+provider = "goes"  # gibs | himawari | goes
 layers = [
   "VIIRS_SNPP_CorrectedReflectance_TrueColor",
   "MODIS_Terra_CorrectedReflectance_TrueColor",
@@ -74,11 +71,6 @@ himawari_max_lookback_minutes = 240
 # - fill: crop to fill the wallpaper (may cut off space around the disk)
 # - fit: keep the whole earth disk visible, letterbox with a space background
 himawari_layout = "fill"
-
-# When using full-disk providers (Himawari/GOES) with himawari_layout="fit",
-# you can shrink/enlarge the disk on screen without changing its aspect.
-# 1.0 = as large as possible; 0.75 = shrink by 25%.
-full_disk_scale = 1.0
 
 # Himawari true color (daytime only):
 # - Product: D531106

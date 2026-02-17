@@ -39,6 +39,8 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 
 也可以直接写到 `config.toml` 的 `[network]` 里（计划任务也会自动生效）。
 
+如果你的 Windows 代理是通过 WPAD/PAC 自动配置（例如注册表里有 `AutoConfigURL`，但 `ProxyEnable=0`），本工具也会尝试通过 WinHTTP 自动解析每个 URL 应该走的代理（无需手动找出 proxy host:port）。
+
 如果你机器上 `python` 会弹出 Microsoft Store（Windows 的 App execution alias），请安装 python.org 的 Python，并在“应用执行别名”里关闭 `python.exe/python3.exe` 的别名；或在后面的计划任务脚本里用 `-PythonExe` 显式指定真实的 `python.exe` 路径。
 
 ### 3) 配置
@@ -60,9 +62,11 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 - `location.lat / location.lon`: 手动指定经纬度
 - `area.half_width_km / area.half_height_km`: 拉取范围（越大越耗流量）
 - `image.width / image.height`: 输出分辨率（建议和你屏幕一致）
+- `image.width / image.height`: 也可以设置为 `0` 或 `"auto"`，自动读取主显示器分辨率
 - `satellite.layers`: 图层列表（会按顺序尝试）
 - `region.mode`: `local`（拉取你附近）或 `country`（拉取整国范围，适合“国家云图”）
 - `wallpaper.style`: `fill|fit|stretch|center|span`
+- `satellite.full_disk_scale`: （仅 full-disk：Himawari/GOES）在 `himawari_layout="fit"` 下缩放圆盘大小，例如 `0.75` 表示缩小 1/4
 - `retention.keep_days`: 本地保留最近几天的图片（按日期文件夹清理）；设为 1 表示只保留今天
 
 #### 想要“国家云图”（整国范围）
@@ -156,6 +160,8 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 
 `powershell -ExecutionPolicy Bypass -File scripts\\install-hourly-task.ps1 -ConfigPath config.toml -RunNow`
 
+如果“任务运行了但壁纸没变化”，优先看日志：`logs\\task-run.latest.log`（常见原因是企业代理把 Himawari 资源替换成占位图/拦截页）。
+
 如果需要指定 Python 路径：
 
 `powershell -ExecutionPolicy Bypass -File scripts\\install-task.ps1 -ConfigPath config.toml -IntervalMinutes 30 -PythonExe C:\\Path\\To\\python.exe`
@@ -203,4 +209,20 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 如果你在企业网络/代理环境里遇到“生成的图几乎全黑/几乎没内容”，脚本会自动跳过部分站点返回的占位帧；如果仍然失败，并提示 tile 被代理替换（corner/center tiles byte-identical），通常表示域名被代理拦截并返回了统一的占位图片，需要在代理侧为 `himawari8-dl.nict.go.jp` 例外/放行，或改用 GIBS/ESRI 等图源。
 
 注意：Himawari 是固定卫星视角（适合东亚/亚太）；美洲更适合 GOES 系列（有稳定 `latest.jpg`）。
+
+#### 备选：GOES（NOAA，美洲半球）地球圆盘真彩
+
+如果你的网络环境拦截了 Himawari（`himawari8-dl.nict.go.jp`），但你仍然想要“地球圆盘”而不是矩形底图，可以改用 NOAA 的 GOES 全圆盘真彩（GEOCOLOR）：
+
+- 配置：`[satellite] provider = "goes"`
+- 常用参数：
+	- `goes_satellite = "GOES18"`（更偏太平洋/西半球）或 `"GOES16"`（更偏大西洋/东半球）
+	- `goes_product = "GEOCOLOR"`
+	- `goes_size = 5424`（也可用 1808/10848，越大越清晰但越耗流量）
+	- `himawari_layout = "fit"`（同样适用于 GOES，让圆盘完整显示）
+
+对应的直接下载 URL（示例）：
+
+- GOES18 / GEOCOLOR / 5424：`https://cdn.star.nesdis.noaa.gov/GOES18/ABI/FD/GEOCOLOR/5424x5424.jpg`
+- GOES18 / GEOCOLOR / 1808：`https://cdn.star.nesdis.noaa.gov/GOES18/ABI/FD/GEOCOLOR/1808x1808.jpg`
 # global-background

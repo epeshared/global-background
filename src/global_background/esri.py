@@ -7,6 +7,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+from .system_proxy import system_proxy_env_for_url
+
 
 ESRI_WORLD_IMAGERY_EXPORT = (
     "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export"
@@ -48,8 +50,9 @@ def fetch_esri_world_imagery(req: EsriExportRequest, timeout_s: float = 30.0) ->
     http_req = Request(url, headers={"User-Agent": "global-background/0.1"})
 
     try:
-        with urlopen(http_req, timeout=timeout_s) as resp:
-            data = resp.read()
+        with system_proxy_env_for_url(http_req.full_url):
+            with urlopen(http_req, timeout=timeout_s) as resp:
+                data = resp.read()
     except HTTPError as exc:
         raise RuntimeError(f"ESRI export HTTP error: {exc.code}") from exc
     except URLError as exc:
@@ -59,6 +62,7 @@ def fetch_esri_world_imagery(req: EsriExportRequest, timeout_s: float = 30.0) ->
         raise RuntimeError("ESRI returned unexpectedly small image payload")
 
     return data
+
 
 
 def default_label() -> str:

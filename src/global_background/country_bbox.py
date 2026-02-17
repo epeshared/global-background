@@ -4,6 +4,8 @@ import json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .system_proxy import system_proxy_env_for_url
+
 
 # Rough built-in fallbacks (lat_min, lon_min, lat_max, lon_max)
 # Used only when online resolution is unavailable.
@@ -71,8 +73,9 @@ def _try_nominatim_country_bbox(*, name: str, timeout_s: float) -> tuple[float, 
     )
 
     try:
-        with urlopen(req, timeout=timeout_s) as resp:
-            payload = resp.read().decode("utf-8", errors="replace")
+        with system_proxy_env_for_url(req.full_url):
+            with urlopen(req, timeout=timeout_s) as resp:
+                payload = resp.read().decode("utf-8", errors="replace")
         data = json.loads(payload)
         if not isinstance(data, list) or not data:
             return None

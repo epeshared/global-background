@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import json
 from urllib.request import Request, urlopen
 
+from .system_proxy import system_proxy_env_for_url
+
 
 @dataclass(frozen=True)
 class GeoLocation:
@@ -23,8 +25,9 @@ def get_location_from_ip(timeout_s: float = 10.0) -> GeoLocation:
 
     # ipapi.co: simple unauthenticated endpoint
     req = Request("https://ipapi.co/json/", headers={"User-Agent": "global-background/0.1"})
-    with urlopen(req, timeout=timeout_s) as resp:
-        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    with system_proxy_env_for_url(req.full_url):
+        with urlopen(req, timeout=timeout_s) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
 
     lat = float(data["latitude"])
     lon = float(data["longitude"])
@@ -43,3 +46,4 @@ def get_location_from_ip(timeout_s: float = 10.0) -> GeoLocation:
         country_code=str(country_code).upper() if country_code else None,
         country_name=str(country) if country else None,
     )
+

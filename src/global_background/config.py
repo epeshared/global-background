@@ -30,7 +30,7 @@ class ImageConfig:
 
 @dataclass(frozen=True)
 class SatelliteConfig:
-    provider: str  # "gibs" | "himawari" (direct full-disk)
+    provider: str  # "gibs" | "himawari" | "goes" (direct full-disk)
     layers: list[str]
     max_days_back: int
     himawari_band: str | None
@@ -38,6 +38,15 @@ class SatelliteConfig:
     himawari_product: str
     himawari_max_lookback_minutes: int
     himawari_layout: str  # "fill" (crop) | "fit" (contain/letterbox)
+
+    # For full-disk providers (GOES/Himawari): additional scale factor applied in "fit" mode.
+    # 1.0 = as large as possible while fitting; 0.75 = shrink by 25%.
+    full_disk_scale: float
+
+    # GOES (NOAA) full-disk (earth disc)
+    goes_satellite: str
+    goes_product: str
+    goes_size: int
 
 
 @dataclass(frozen=True)
@@ -113,6 +122,17 @@ def _as_int(value: Any, key: str) -> int:
         return int(value)
     except Exception as exc:
         raise ValueError(f"Invalid int for {key}: {value!r}") from exc
+
+
+def _as_int_or_auto(value: Any, key: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"auto", "screen"}:
+        return None
+    v = _as_int(value, key)
+    if v <= 0:
+        return None
+    return v
 
 
 def _as_float(value: Any, key: str) -> float:
@@ -283,9 +303,22 @@ def load_config(path: Path) -> AppConfig:
     if not isinstance(image_raw, dict):
         raise ValueError("image must be a mapping")
 
+    width_val = _as_int_or_auto(image_raw.get("width", 3840), "image.width")
+    height_val = _as_int_or_auto(image_raw.get("height", 2160), "image.height")
+    if width_val is None or height_val is None:
+        try:
+            from .screen import get_primary_screen_size
+
+            sw, sh = get_primary_screen_size()
+            width_val = int(sw)
+            height_val = int(sh)
+        except Exception:
+            width_val = width_val or 1920
+            height_val = height_val or 1080
+
     image = ImageConfig(
-        width=_as_int(image_raw.get("width", 3840), "image.width"),
-        height=_as_int(image_raw.get("height", 2160), "image.height"),
+        width=int(width_val),
+        height=int(height_val),
         format=str(image_raw.get("format", "jpg")).lower(),
         quality=_as_int(image_raw.get("quality", 92), "image.quality"),
     )
@@ -295,8 +328,8 @@ def load_config(path: Path) -> AppConfig:
         raise ValueError("satellite must be a mapping")
 
     provider = str(sat_raw.get("provider", "gibs")).strip().lower()
-    if provider not in {"gibs", "himawari"}:
-        raise ValueError("satellite.provider must be 'gibs' or 'himawari'")
+    if provider not in {"gibs", "himawari", "goes"}:
+        raise ValueError("satellite.provider must be 'gibs', 'himawari', or 'goes'")
 
     layers = sat_raw.get("layers")
     if layers is None:
@@ -321,10 +354,17 @@ def load_config(path: Path) -> AppConfig:
             "satellite.himawari_max_lookback_minutes",
         ),
         himawari_layout=str(sat_raw.get("himawari_layout", "fill")).strip().lower(),
+        full_disk_scale=_as_float(sat_raw.get("full_disk_scale", 1.0), "satellite.full_disk_scale"),
+        goes_satellite=str(sat_raw.get("goes_satellite", "GOES18")).strip(),
+        goes_product=str(sat_raw.get("goes_product", "GEOCOLOR")).strip(),
+        goes_size=_as_int(sat_raw.get("goes_size", 5424), "satellite.goes_size"),
     )
 
     if satellite.himawari_layout not in {"fill", "fit"}:
         raise ValueError("satellite.himawari_layout must be 'fill' or 'fit'")
+
+    if not (0.1 <= float(satellite.full_disk_scale) <= 2.0):
+        raise ValueError("satellite.full_disk_scale must be between 0.1 and 2.0")
 
     # Backward-compatible mapping: himawari_size => himawari_level_d
     # size refers to final square resolution when using 550px tiles.
@@ -344,6 +384,10 @@ def load_config(path: Path) -> AppConfig:
                     himawari_product=satellite.himawari_product,
                     himawari_max_lookback_minutes=satellite.himawari_max_lookback_minutes,
                     himawari_layout=satellite.himawari_layout,
+                    full_disk_scale=satellite.full_disk_scale,
+                    goes_satellite=satellite.goes_satellite,
+                    goes_product=satellite.goes_product,
+                    goes_size=satellite.goes_size,
                 )
         except Exception:
             pass

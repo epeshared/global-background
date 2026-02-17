@@ -8,6 +8,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+from .system_proxy import system_proxy_env_for_url
+
 
 GIBS_WMS_EPSG4326_BEST = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"
 
@@ -63,9 +65,10 @@ def fetch_wms_image_bytes(
     url = f"{GIBS_WMS_EPSG4326_BEST}?{urlencode(params)}"
     http_req = Request(url, headers={"User-Agent": "global-background/0.1"})
     try:
-        with urlopen(http_req, timeout=timeout_s) as resp:
-            content_type = (resp.headers.get("Content-Type") or "").lower()
-            data = resp.read()
+        with system_proxy_env_for_url(http_req.full_url):
+            with urlopen(http_req, timeout=timeout_s) as resp:
+                content_type = (resp.headers.get("Content-Type") or "").lower()
+                data = resp.read()
     except HTTPError as exc:
         raise RuntimeError(f"GIBS WMS HTTP error: {exc.code}") from exc
     except URLError as exc:
@@ -79,6 +82,7 @@ def fetch_wms_image_bytes(
         raise RuntimeError("GIBS returned unexpectedly small image payload")
 
     return data
+
 
 
 def iter_recent_dates(max_days_back: int, today: dt.date | None = None) -> Iterable[dt.date]:
