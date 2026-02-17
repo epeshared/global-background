@@ -26,7 +26,7 @@ SLIDER_BASE = "https://slider.cira.colostate.edu"
 @dataclass(frozen=True)
 class SliderFullDiskRequest:
     satellite: str = "himawari"  # "himawari" | "gk2a"
-    sector: str = "full_disk"  # currently only this is supported
+    sector: str = "full_disk"  # e.g. full_disk | korea
     product: str = "geocolor"  # e.g. geocolor | natural_color | band_13 ...
 
     # Max imagery pyramid level to use. Levels map to tiles_per_side = 2**level.

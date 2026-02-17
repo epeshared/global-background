@@ -43,11 +43,6 @@ class SatelliteConfig:
     # 1.0 = as large as possible while fitting; 0.75 = shrink by 25%.
     full_disk_scale: float
 
-    # Where to place the full-disk earth on the wallpaper when himawari_layout="fit".
-    # - satellite: center the disk on screen
-    # - location: shift so the configured/auto location is near the screen center (approx)
-    full_disk_center: str  # "satellite" | "location"
-
     # GOES (NOAA) full-disk (earth disc)
     goes_satellite: str
     goes_product: str
@@ -55,9 +50,13 @@ class SatelliteConfig:
 
     # SLIDER (RAMMB/CIRA) full-disk tiles (Himawari / GK2A)
     slider_satellite: str  # "himawari" | "gk2a"
-    slider_sector: str  # "full_disk"
+    slider_sector: str  # e.g. "full_disk" | "korea"
     slider_product: str  # e.g. "geocolor"
     slider_max_level: int  # 0..4 (tiles_per_side = 2**level)
+
+    # FY-4 (NSMC) full-disk JPEG — China-centered (~104.7°E)
+    fy4_satellite: str  # "fy4a" | "fy4b"
+    fy4_product: str    # "mtcc" (FY4A) | "gclr" (FY4B)
 
 
 @dataclass(frozen=True)
@@ -339,8 +338,8 @@ def load_config(path: Path) -> AppConfig:
         raise ValueError("satellite must be a mapping")
 
     provider = str(sat_raw.get("provider", "gibs")).strip().lower()
-    if provider not in {"gibs", "himawari", "goes", "slider"}:
-        raise ValueError("satellite.provider must be 'gibs', 'himawari', 'goes', or 'slider'")
+    if provider not in {"gibs", "himawari", "goes", "slider", "fy4"}:
+        raise ValueError("satellite.provider must be 'gibs', 'himawari', 'goes', 'slider', or 'fy4'")
 
     layers = sat_raw.get("layers")
     if layers is None:
@@ -366,7 +365,6 @@ def load_config(path: Path) -> AppConfig:
         ),
         himawari_layout=str(sat_raw.get("himawari_layout", "fill")).strip().lower(),
         full_disk_scale=_as_float(sat_raw.get("full_disk_scale", 1.0), "satellite.full_disk_scale"),
-        full_disk_center=str(sat_raw.get("full_disk_center", "satellite")).strip().lower(),
         goes_satellite=str(sat_raw.get("goes_satellite", "GOES18")).strip(),
         goes_product=str(sat_raw.get("goes_product", "GEOCOLOR")).strip(),
         goes_size=_as_int(sat_raw.get("goes_size", 5424), "satellite.goes_size"),
@@ -375,6 +373,9 @@ def load_config(path: Path) -> AppConfig:
         slider_sector=str(sat_raw.get("slider_sector", "full_disk")).strip().lower(),
         slider_product=str(sat_raw.get("slider_product", "geocolor")).strip().lower(),
         slider_max_level=_as_int(sat_raw.get("slider_max_level", 3), "satellite.slider_max_level"),
+
+        fy4_satellite=str(sat_raw.get("fy4_satellite", "fy4a")).strip().lower(),
+        fy4_product=str(sat_raw.get("fy4_product", "mtcc")).strip().lower(),
     )
 
     if satellite.himawari_layout not in {"fill", "fit"}:
@@ -383,15 +384,17 @@ def load_config(path: Path) -> AppConfig:
     if not (0.1 <= float(satellite.full_disk_scale) <= 2.0):
         raise ValueError("satellite.full_disk_scale must be between 0.1 and 2.0")
 
-    if satellite.full_disk_center not in {"satellite", "location"}:
-        raise ValueError("satellite.full_disk_center must be 'satellite' or 'location'")
-
-    if satellite.slider_sector not in {"full_disk"}:
-        raise ValueError("satellite.slider_sector must be 'full_disk'")
+    if satellite.slider_sector not in {"full_disk", "korea"}:
+        raise ValueError("satellite.slider_sector must be 'full_disk' or 'korea'")
     if satellite.slider_satellite not in {"himawari", "gk2a"}:
         raise ValueError("satellite.slider_satellite must be 'himawari' or 'gk2a'")
     if not (0 <= int(satellite.slider_max_level) <= 4):
         raise ValueError("satellite.slider_max_level must be between 0 and 4")
+
+    if satellite.fy4_satellite not in {"fy4a", "fy4b"}:
+        raise ValueError("satellite.fy4_satellite must be 'fy4a' or 'fy4b'")
+    if satellite.fy4_product not in {"mtcc", "gclr"}:
+        raise ValueError("satellite.fy4_product must be 'mtcc' or 'gclr'")
 
     # Backward-compatible mapping: himawari_size => himawari_level_d
     # size refers to final square resolution when using 550px tiles.
@@ -412,7 +415,6 @@ def load_config(path: Path) -> AppConfig:
                     himawari_max_lookback_minutes=satellite.himawari_max_lookback_minutes,
                     himawari_layout=satellite.himawari_layout,
                     full_disk_scale=satellite.full_disk_scale,
-                    full_disk_center=satellite.full_disk_center,
                     goes_satellite=satellite.goes_satellite,
                     goes_product=satellite.goes_product,
                     goes_size=satellite.goes_size,
@@ -421,6 +423,9 @@ def load_config(path: Path) -> AppConfig:
                     slider_sector=satellite.slider_sector,
                     slider_product=satellite.slider_product,
                     slider_max_level=satellite.slider_max_level,
+
+                    fy4_satellite=satellite.fy4_satellite,
+                    fy4_product=satellite.fy4_product,
                 )
         except Exception:
             pass

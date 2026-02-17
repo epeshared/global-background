@@ -11,7 +11,7 @@ auto_location = true
 # Example: "http://proxy.mycorp.com:8080"
 https_proxy = ""
 http_proxy = ""
-timeout_s = 120
+timeout_s = 30
 
 [region]
 # local: use a bbox around (lat, lon)
@@ -53,7 +53,7 @@ format = "jpg"   # jpg or png
 quality = 92
 
 [satellite]
-provider = "fy4"  # gibs | himawari | goes | slider | fy4
+provider = "slider"  # gibs | himawari | goes | slider
 layers = [
   "VIIRS_SNPP_CorrectedReflectance_TrueColor",
   "MODIS_Terra_CorrectedReflectance_TrueColor",
@@ -67,12 +67,6 @@ slider_satellite = "gk2a"  # himawari | gk2a
 slider_sector = "full_disk"   # full_disk | korea
 slider_product = "geocolor"    # geocolor | natural_color | band_13 ...
 slider_max_level = 3           # 0..4 (higher = more detail + bandwidth)
-
-# FY-4 (NSMC) full-disk JPEG — China-centered (~104.7°E)
-# FY4A + mtcc: multi-channel true-colour composite (~2200x2200, ~800 KB, fast)
-# FY4B + gclr: AGRI geo-colour (~11000x12000, ~11 MB, high-res)
-fy4_satellite = "fy4b"  # fy4a | fy4b
-fy4_product = "gclr"    # mtcc (FY4A) | gclr (FY4B)
 
 # Himawari direct full-disk (infrared cloud image works day+night)
 himawari_product = "FULL_24h"

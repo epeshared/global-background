@@ -21,6 +21,7 @@ from .globe import encode_image, make_background, render_orthographic_globe
 from .himawari import HimawariFullDiskRequest, fetch_latest_full_disk_png
 from .goes import GoesFullDiskRequest, fetch_latest_full_disk_jpg
 from .slider import SliderFullDiskRequest, fetch_latest_full_disk_png as fetch_slider_latest_full_disk_png
+from .fy4 import FY4FullDiskRequest, fetch_latest_full_disk_jpg as fetch_fy4_latest_full_disk_jpg
 from .gibs import GibsRequest, fetch_wms_image_bytes, iter_recent_dates
 from .esri import EsriExportRequest, default_date as esri_date, default_label as esri_label, fetch_esri_world_imagery
 from .location import get_location_from_ip
@@ -139,6 +140,96 @@ def fetch_best_available(
     country_name: str | None = None,
 ) -> FetchResult:
     last_exc: Exception | None = None
+
+    if cfg.satellite.provider == "fy4":
+        if Image is None:
+            print(
+                "[global-background] Note: provider='fy4' returns a full-disk JPEG. "
+                "Install Pillow to auto-crop/resize it to your screen (e.g. `python -m pip install -e .[full]`).",
+                file=sys.stderr,
+            )
+        try:
+            jpg, ts_utc, url = fetch_fy4_latest_full_disk_jpg(
+                FY4FullDiskRequest(
+                    satellite=cfg.satellite.fy4_satellite,
+                    product=cfg.satellite.fy4_product,
+                ),
+                timeout_s=float(cfg.network.timeout_s),
+            )
+
+            sat = (cfg.satellite.fy4_satellite or "").strip().upper()
+            prod = (cfg.satellite.fy4_product or "").strip().upper()
+            label = f"FY4_{sat}_{prod}"
+
+            if Image is not None:
+                try:
+                    img = Image.open(BytesIO(jpg)).convert("RGB")
+                    img.load()
+
+                    src_w, src_h = img.size
+                    target_w, target_h = int(cfg.image.width), int(cfg.image.height)
+
+                    layout = (cfg.satellite.himawari_layout or "fill").strip().lower()
+                    if layout == "fit":
+                        bg = make_background(
+                            width=target_w,
+                            height=target_h,
+                            style=cfg.region.globe_background_style,
+                            rgb1=cfg.region.globe_background_rgb,
+                            rgb2=cfg.region.globe_background_rgb2,
+                            stars=cfg.region.globe_background_stars,
+                        )
+                        scale = min(target_w / max(1, src_w), target_h / max(1, src_h))
+                        scale *= float(getattr(cfg.satellite, "full_disk_scale", 1.0) or 1.0)
+                        bbox = _nonblack_bbox_rgb(img)
+                        new_w = max(1, int(round(src_w * scale)))
+                        new_h = max(1, int(round(src_h * scale)))
+                        fg = img.resize((new_w, new_h), resample=Image.LANCZOS)
+                        left, top = _fit_paste_xy(
+                            target_w=target_w,
+                            target_h=target_h,
+                            src_w=src_w,
+                            src_h=src_h,
+                            scale=scale,
+                            content_bbox=bbox,
+                        )
+                        bg.paste(fg, (left, top))
+                        img = bg
+                    else:
+                        target_aspect = target_w / max(1, target_h)
+                        src_aspect = src_w / max(1, src_h)
+
+                        if abs(src_aspect - target_aspect) > 1e-6:
+                            if target_aspect > src_aspect:
+                                crop_h = int(round(src_w / target_aspect))
+                                crop_h = max(1, min(src_h, crop_h))
+                                top = (src_h - crop_h) // 2
+                                img = img.crop((0, top, src_w, top + crop_h))
+                            else:
+                                crop_w = int(round(src_h * target_aspect))
+                                crop_w = max(1, min(src_w, crop_w))
+                                left = (src_w - crop_w) // 2
+                                img = img.crop((left, 0, left + crop_w, src_h))
+
+                        img = img.resize((target_w, target_h), resample=Image.LANCZOS)
+
+                    buf = BytesIO()
+                    if cfg.image.format in {"jpg", "jpeg"}:
+                        img.save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+                        return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg")
+                    img.save(buf, format="PNG", optimize=True)
+                    return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png")
+                except Exception:
+                    pass
+
+            return FetchResult(layer=label, date=ts_utc.date(), image_bytes=jpg, content_ext=".jpg")
+        except Exception as exc:
+            last_exc = exc
+            print(
+                "[global-background] FY-4 fetch failed; falling back to SLIDER/GOES/Himawari/GIBS/ESRI. "
+                f"Reason: {exc!r}",
+                file=sys.stderr,
+            )
 
     if cfg.satellite.provider == "slider":
         if Image is None:
