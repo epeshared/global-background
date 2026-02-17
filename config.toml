@@ -4,7 +4,8 @@ update_interval_minutes = 30
 output_dir = "out"
 
 # Location: either set auto_location=true, or provide lat/lon
-auto_location = true
+# For a stable "China-centered" view, prefer using the configured location below.
+auto_location = false
 
 [network]
 # If you are behind a corporate proxy, set these.
@@ -53,12 +54,18 @@ format = "jpg"   # jpg or png
 quality = 92
 
 [satellite]
-provider = "goes"  # gibs | himawari | goes
+provider = "slider"  # gibs | himawari | goes | slider
 layers = [
   "VIIRS_SNPP_CorrectedReflectance_TrueColor",
   "MODIS_Terra_CorrectedReflectance_TrueColor",
 ]
 max_days_back = 10
+
+# SLIDER (RAMMB/CIRA) full-disk (tiled) — Asia-friendly full-disk view
+slider_satellite = "gk2a"  # himawari | gk2a
+slider_sector = "full_disk"
+slider_product = "geocolor"    # geocolor | natural_color | band_13 ...
+slider_max_level = 3           # 0..4 (higher = more detail + bandwidth)
 
 # Himawari direct full-disk (infrared cloud image works day+night)
 himawari_product = "FULL_24h"
@@ -75,6 +82,11 @@ himawari_layout = "fit"
 # In fit mode, shrink/enlarge the full-disk earth without cropping.
 # 1.0 = as large as possible; 0.75 = shrink by 25%.
 full_disk_scale = 0.75
+
+# Where to place the full-disk earth on your screen in fit mode.
+# - satellite: center the disk on screen
+# - location: shift so your configured (location.lat, location.lon) is near the screen center (approx)
+full_disk_center = "location"
 
 # Himawari true color (daytime only):
 # - Product: D531106

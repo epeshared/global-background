@@ -210,6 +210,19 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 
 注意：Himawari 是固定卫星视角（适合东亚/亚太）；美洲更适合 GOES 系列（有稳定 `latest.jpg`）。
 
+#### 备选：SLIDER（RAMMB/CIRA，Himawari / GK2A）更稳定的“最新帧”
+
+如果你想要“亚洲视角的真实地球圆盘”，并且你的网络更容易访问 `slider.cira.colostate.edu`，可以用 SLIDER 图源：
+
+- 配置：`[satellite] provider = "slider"`
+- 常用参数：
+	- `slider_satellite = "himawari"`（也可以试 `"gk2a"`）
+	- `slider_product = "geocolor"`（真彩合成；也可尝试 `natural_color`/`band_13` 等）
+	- `slider_max_level = 3`（越大越清晰但越耗流量；0..4）
+	- `himawari_layout = "fit"` + `full_disk_scale = 0.75`（让圆盘完整显示并缩小一点）
+
+SLIDER 会通过 `latest_times.json` 直接取“最新时间戳”，比 Himawari 原站那种回退探测更稳定；如果企业代理拦截了这个域名，同样会触发“corner/center tiles byte-identical”的快速失败提示。
+
 #### 备选：GOES（NOAA，美洲半球）地球圆盘真彩
 
 如果你的网络环境拦截了 Himawari（`himawari8-dl.nict.go.jp`），但你仍然想要“地球圆盘”而不是矩形底图，可以改用 NOAA 的 GOES 全圆盘真彩（GEOCOLOR）：

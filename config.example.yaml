@@ -61,7 +61,7 @@ image:
 # - VIIRS_SNPP_CorrectedReflectance_TrueColor (often good and recent)
 # - MODIS_Terra_CorrectedReflectance_TrueColor
 satellite:
-  provider: "gibs"  # gibs | himawari
+  provider: "gibs"  # gibs | himawari | goes | slider
   layers:
     - "VIIRS_SNPP_CorrectedReflectance_TrueColor"
     - "MODIS_Terra_CorrectedReflectance_TrueColor"
@@ -73,6 +73,19 @@ satellite:
   # Resolution level: 1d=550, 2d=1100, 4d=2200, 8d=4400 (tiles stitched)
   himawari_level_d: 8
   himawari_max_lookback_minutes: 240
+
+  # Full-disk layout for Himawari/GOES/SLIDER
+  # - fill: crop to fill the wallpaper
+  # - fit: keep the full disk visible, letterbox with space background
+  himawari_layout: "fit"
+  full_disk_scale: 0.75
+
+  # SLIDER (RAMMB/CIRA) full-disk (tiled)
+  # Use this for Asia-friendly full-disk views if `slider.cira.colostate.edu` is reachable.
+  # slider_satellite: "himawari"  # himawari | gk2a
+  # slider_sector: "full_disk"
+  # slider_product: "geocolor"
+  # slider_max_level: 3  # 0..4
 
 # Wallpaper style: fill | fit | stretch | center | span
 wallpaper:

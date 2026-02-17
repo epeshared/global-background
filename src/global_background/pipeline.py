@@ -20,6 +20,7 @@ from .country_bbox import resolve_country_bbox_latlon
 from .globe import encode_image, make_background, render_orthographic_globe
 from .himawari import HimawariFullDiskRequest, fetch_latest_full_disk_png
 from .goes import GoesFullDiskRequest, fetch_latest_full_disk_jpg
+from .slider import SliderFullDiskRequest, fetch_latest_full_disk_png as fetch_slider_latest_full_disk_png
 from .gibs import GibsRequest, fetch_wms_image_bytes, iter_recent_dates
 from .esri import EsriExportRequest, default_date as esri_date, default_label as esri_label, fetch_esri_world_imagery
 from .location import get_location_from_ip
@@ -91,6 +92,44 @@ def _build_bbox(lat: float, lon: float, half_w_km: float, half_h_km: float) -> t
     return (lat_min, lon_min, lat_max, lon_max)
 
 
+def _nonblack_bbox_rgb(img, *, threshold: int = 10) -> tuple[int, int, int, int] | None:
+    """Best-effort bounding box of non-black content.
+
+    Used to center full-disk imagery content (earth disk) on screen in fit mode.
+    Returns (left, top, right, bottom) in source pixel coordinates.
+    """
+
+    if Image is None:
+        return None
+    try:
+        from PIL import ImageChops  # type: ignore
+
+        rgb = img.convert("RGB")
+        r, g, b = rgb.split()
+        m = ImageChops.lighter(ImageChops.lighter(r, g), b)
+        mask = m.point(lambda v: 255 if v > int(threshold) else 0)
+        return mask.getbbox()
+    except Exception:
+        return None
+
+
+def _fit_paste_xy(
+    *, target_w: int, target_h: int, src_w: int, src_h: int, scale: float, content_bbox: tuple[int, int, int, int] | None
+) -> tuple[int, int]:
+    new_w = max(1, int(round(src_w * scale)))
+    new_h = max(1, int(round(src_h * scale)))
+
+    if content_bbox is None:
+        return (int((target_w - new_w) // 2), int((target_h - new_h) // 2))
+
+    l, t, r, b = content_bbox
+    cx = (float(l) + float(r)) / 2.0
+    cy = (float(t) + float(b)) / 2.0
+    left = int(round((target_w / 2.0) - (cx * scale)))
+    top = int(round((target_h / 2.0) - (cy * scale)))
+    return (left, top)
+
+
 def fetch_best_available(
     cfg: AppConfig,
     lat: float,
@@ -100,6 +139,103 @@ def fetch_best_available(
     country_name: str | None = None,
 ) -> FetchResult:
     last_exc: Exception | None = None
+
+    if cfg.satellite.provider == "slider":
+        if Image is None:
+            print(
+                "[global-background] Note: provider='slider' returns a square full-disk image. "
+                "Install Pillow to stitch tiles and to auto-crop/resize it to your screen (e.g. `python -m pip install -e .[full]`).",
+                file=sys.stderr,
+            )
+        try:
+            png, ts_utc, url = fetch_slider_latest_full_disk_png(
+                SliderFullDiskRequest(
+                    satellite=cfg.satellite.slider_satellite,
+                    sector=cfg.satellite.slider_sector,
+                    product=cfg.satellite.slider_product,
+                    max_level=int(cfg.satellite.slider_max_level),
+                ),
+                timeout_s=float(cfg.network.timeout_s),
+                target_max_dim_px=max(int(cfg.image.width), int(cfg.image.height)),
+            )
+
+            sat = (cfg.satellite.slider_satellite or "").strip().upper()
+            sector = (cfg.satellite.slider_sector or "").strip().upper()
+            product = (cfg.satellite.slider_product or "").strip().upper()
+            label = f"SLIDER_{sat}_{sector}_{product}"
+            _ = url  # kept for potential logging later
+
+            # If Pillow is available, transform the square full-disk image into the configured
+            # wallpaper size.
+            if Image is not None:
+                try:
+                    img = Image.open(BytesIO(png)).convert("RGB")
+                    img.load()
+
+                    src_w, src_h = img.size
+                    target_w, target_h = int(cfg.image.width), int(cfg.image.height)
+
+                    layout = (cfg.satellite.himawari_layout or "fill").strip().lower()
+                    if layout == "fit":
+                        bg = make_background(
+                            width=target_w,
+                            height=target_h,
+                            style=cfg.region.globe_background_style,
+                            rgb1=cfg.region.globe_background_rgb,
+                            rgb2=cfg.region.globe_background_rgb2,
+                            stars=cfg.region.globe_background_stars,
+                        )
+                        scale = min(target_w / max(1, src_w), target_h / max(1, src_h))
+                        scale *= float(getattr(cfg.satellite, "full_disk_scale", 1.0) or 1.0)
+                        bbox = _nonblack_bbox_rgb(img)
+                        new_w = max(1, int(round(src_w * scale)))
+                        new_h = max(1, int(round(src_h * scale)))
+                        fg = img.resize((new_w, new_h), resample=Image.LANCZOS)
+                        left, top = _fit_paste_xy(
+                            target_w=target_w,
+                            target_h=target_h,
+                            src_w=src_w,
+                            src_h=src_h,
+                            scale=scale,
+                            content_bbox=bbox,
+                        )
+                        bg.paste(fg, (left, top))
+                        img = bg
+                    else:
+                        target_aspect = target_w / max(1, target_h)
+                        src_aspect = src_w / max(1, src_h)
+
+                        if abs(src_aspect - target_aspect) > 1e-6:
+                            if target_aspect > src_aspect:
+                                crop_h = int(round(src_w / target_aspect))
+                                crop_h = max(1, min(src_h, crop_h))
+                                top = (src_h - crop_h) // 2
+                                img = img.crop((0, top, src_w, top + crop_h))
+                            else:
+                                crop_w = int(round(src_h * target_aspect))
+                                crop_w = max(1, min(src_w, crop_w))
+                                left = (src_w - crop_w) // 2
+                                img = img.crop((left, 0, left + crop_w, src_h))
+
+                        img = img.resize((target_w, target_h), resample=Image.LANCZOS)
+
+                    buf = BytesIO()
+                    if cfg.image.format in {"jpg", "jpeg"}:
+                        img.save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+                        return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg")
+                    img.save(buf, format="PNG", optimize=True)
+                    return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png")
+                except Exception:
+                    pass
+
+            return FetchResult(layer=label, date=ts_utc.date(), image_bytes=png, content_ext=".png")
+        except Exception as exc:
+            last_exc = exc
+            print(
+                "[global-background] SLIDER fetch failed; falling back to GOES/Himawari/GIBS/ESRI. "
+                f"Reason: {exc!r}",
+                file=sys.stderr,
+            )
 
     if cfg.satellite.provider == "goes":
         if Image is None:
@@ -145,11 +281,18 @@ def fetch_best_available(
                         )
                         scale = min(target_w / max(1, src_w), target_h / max(1, src_h))
                         scale *= float(getattr(cfg.satellite, "full_disk_scale", 1.0) or 1.0)
+                        bbox = _nonblack_bbox_rgb(img)
                         new_w = max(1, int(round(src_w * scale)))
                         new_h = max(1, int(round(src_h * scale)))
                         fg = img.resize((new_w, new_h), resample=Image.LANCZOS)
-                        left = (target_w - new_w) // 2
-                        top = (target_h - new_h) // 2
+                        left, top = _fit_paste_xy(
+                            target_w=target_w,
+                            target_h=target_h,
+                            src_w=src_w,
+                            src_h=src_h,
+                            scale=scale,
+                            content_bbox=bbox,
+                        )
                         bg.paste(fg, (left, top))
                         img = bg
                     else:
@@ -238,11 +381,18 @@ def fetch_best_available(
                         )
                         scale = min(target_w / max(1, src_w), target_h / max(1, src_h))
                         scale *= float(getattr(cfg.satellite, "full_disk_scale", 1.0) or 1.0)
+                        bbox = _nonblack_bbox_rgb(img)
                         new_w = max(1, int(round(src_w * scale)))
                         new_h = max(1, int(round(src_h * scale)))
                         fg = img.resize((new_w, new_h), resample=Image.LANCZOS)
-                        left = (target_w - new_w) // 2
-                        top = (target_h - new_h) // 2
+                        left, top = _fit_paste_xy(
+                            target_w=target_w,
+                            target_h=target_h,
+                            src_w=src_w,
+                            src_h=src_h,
+                            scale=scale,
+                            content_bbox=bbox,
+                        )
                         bg.paste(fg, (left, top))
                         img = bg
                     else:
