@@ -100,7 +100,7 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 
 如果你在公司网络下，需要通过代理安装 Pillow（示例）：
 
-`python -m pip install --proxy http://child-prc.intel.com:913 Pillow`
+`python -m pip install --proxy http://XXX.com:900 Pillow`
 
 ### 4) 手动运行
 
