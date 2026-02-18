@@ -106,6 +106,16 @@ full_disk_scale = 1.0
 # # Reuse himawari_layout/full_disk_scale for full-disk providers:
 # himawari_layout = "fit"
 
+# FY-4 (China's Fengyun-4, best China-centered full-disk view):
+# FY-4B is positioned at 104.7°E — China is right at the center of the disk.
+# Data source: NSMC (National Satellite Meteorological Center) img.nsmc.org.cn
+# provider = "fy4"
+# fy4_satellite = "fy4b"    # fy4a | fy4b (recommend fy4b for real-time)
+# fy4_product = "gclr"      # gclr (fy4b only, ~11MB 10992x11912) | mtcc (fy4a only, ~800KB 2198x2198)
+# himawari_layout = "fit"
+# full_disk_scale = 0.75
+# # Note: FY4B GCLR is ~11MB; increase timeout_s to 120 in [network]
+
 [wallpaper]
 style = "fill"   # fill | fit | stretch | center | span
 

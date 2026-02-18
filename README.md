@@ -130,18 +130,42 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 
 `python -m global_background demo --width 1920 --height 1080 --rgb 20,40,60 --style fill`
 
-### 5) 安装为计划任务（推荐）
+### 5) 一键安装（推荐）
+
+> **只需双击一个文件，即可完成全部部署。** 脚本会自动完成以下所有步骤：
+>
+> 1. 🔍 **自动查找 Python** — 扫描 PATH 和常见安装路径，找到可用的 Python 3
+> 2. 📦 **自动安装 Pillow** — 如果找到的 Python 没有 Pillow，自动运行 `pip install Pillow`（含 `ensurepip` 兜底）
+> 3. 🖥️ **自动检测屏幕分辨率** — 使用 DPI-aware Win32 API 读取主显示器真实分辨率，写入 `config.toml`
+> 4. ⏰ **注册 Windows 计划任务** — 每 60 分钟自动拉取最新卫星图并设为壁纸
+> 5. 🚀 **立即执行一次** — 安装完成后马上更新壁纸，无需等待下一个整点
+
+#### 一键安装步骤
+
+1. 复制配置文件：`copy config.example.toml config.toml`
+2. （可选）编辑 `config.toml` 选择你喜欢的卫星源和参数
+3. **双击 `scripts\install-hourly-task.cmd`** — 搞定！
+
+> 💡 **无需手动安装 Pillow、无需手动填写分辨率、无需手动指定 Python 路径。** 脚本会自动处理一切。
+
+如果你的机器上完全没有 Python，需要先安装 [python.org](https://www.python.org/downloads/) 的 Python 3.11+。
+
+---
+
+#### 进阶用法
 
 计划任务模式会每 N 分钟运行一次 `once`（执行完就退出），比常驻进程更稳定。
 
 一键脚本都在 `scripts\` 下，支持两种运行方式：
 
-- 方式 A（推荐）：直接双击 `.cmd`
-- 方式 B：PowerShell 运行 `.ps1`（命令示例见下方）
+- 方式 A（推荐）：直接双击 `.cmd` — 完全零配置
+- 方式 B：PowerShell 运行 `.ps1` — 可自定义参数（命令示例见下方）
 
 #### 手动跑一次（不装任务）
 
 `powershell -ExecutionPolicy Bypass -File scripts\run-once.ps1 -ConfigPath config.toml`
+
+> `run-once.ps1` 同样支持自动安装 Pillow — 如果找不到带 Pillow 的 Python，会自动 `pip install`。
 
 仅生成图片不设置壁纸（调试用）：
 
@@ -151,7 +175,7 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 
 `powershell -ExecutionPolicy Bypass -File scripts\\install-task.ps1 -ConfigPath config.toml -IntervalMinutes 30`
 
-每小时更新一次（一键安装）：
+每小时更新一次：
 
 - PowerShell：`powershell -ExecutionPolicy Bypass -File scripts\\install-hourly-task.ps1 -ConfigPath config.toml`
 - 或双击：`scripts\\install-hourly-task.cmd`
@@ -238,4 +262,30 @@ SLIDER 会通过 `latest_times.json` 直接取“最新时间戳”，比 Himawa
 
 - GOES18 / GEOCOLOR / 5424：`https://cdn.star.nesdis.noaa.gov/GOES18/ABI/FD/GEOCOLOR/5424x5424.jpg`
 - GOES18 / GEOCOLOR / 1808：`https://cdn.star.nesdis.noaa.gov/GOES18/ABI/FD/GEOCOLOR/1808x1808.jpg`
+
+#### 备选：FY-4（中国风云四号，中国视角最佳）🇨🇳
+
+如果你想要**以中国为中心**的地球全圆盘实时云图，FY-4 是最佳选择：
+
+- FY-4B 定点于东经 104.7°（正好覆盖中国全境），比 Himawari（140.7°E）和 GK2A（128.2°E）更居中
+- 数据来源：国家卫星气象中心（NSMC）公开图片服务 `img.nsmc.org.cn`
+- **FY4B GCLR**（地理真彩）：10992×11912 像素，约 11MB，**实时更新**（推荐）
+- FY4A MTCC（多通道真彩）：2198×2198 像素，约 800KB，但**可能有延迟**
+
+配置方法：
+
+```toml
+[satellite]
+provider = "fy4"
+fy4_satellite = "fy4b"    # fy4a | fy4b（推荐 fy4b）
+fy4_product = "gclr"      # gclr (仅 fy4b) | mtcc (仅 fy4a)
+himawari_layout = "fit"   # 保持完整圆盘
+full_disk_scale = 0.75    # 缩小一点避免顶到边
+
+[network]
+timeout_s = 120           # FY4B 图片较大，建议增大超时
+```
+
+> 💡 FY-4B GCLR 图片约 11MB、1.3 亿像素，脚本已自动提升 Pillow 像素上限。如果下载失败会自动重试 3 次（指数退避），最终仍失败则回退到 SLIDER/GIBS 等其他源。
+
 # global-background
