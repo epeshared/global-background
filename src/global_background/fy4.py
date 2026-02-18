@@ -60,34 +60,65 @@ def fetch_latest_full_disk_jpg(
 ) -> tuple[bytes, dt.datetime, str]:
     """Fetch the latest FY-4 full-disk JPEG.
 
+    Uses chunked reading with retries to handle large files (FY4B GCLR ~11-20 MB)
+    over slow/unreliable enterprise proxy connections.
+
     Returns: (jpeg_bytes, timestamp_utc, url)
     """
 
     url = _resolve_url(req)
 
-    http_req = Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) global-background/0.1",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-        },
-    )
+    max_retries = 3
+    chunk_size = 256 * 1024  # 256 KB chunks
 
-    with system_proxy_env_for_url(url):
-        with urlopen(http_req, timeout=float(timeout_s)) as resp:
-            data = resp.read()
+    last_exc: Exception | None = None
+    headers_out = None
 
-    if not data or len(data) < 10_000:
-        raise RuntimeError(f"FY-4 response too small ({len(data)} bytes), likely a placeholder")
+    for attempt in range(max_retries):
+        try:
+            http_req = Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) global-background/0.1",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                },
+            )
+
+            with system_proxy_env_for_url(url):
+                with urlopen(http_req, timeout=float(timeout_s)) as resp:
+                    headers_out = resp.headers
+                    chunks: list[bytes] = []
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                    data = b"".join(chunks)
+
+            if not data or len(data) < 10_000:
+                raise RuntimeError(f"FY-4 response too small ({len(data)} bytes), likely a placeholder")
+
+            # Success
+            break
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise RuntimeError(
+                f"FY-4 download failed after {max_retries} attempts (last error: {last_exc!r})"
+            ) from last_exc
 
     # Try to extract timestamp from Last-Modified header
     ts_utc = dt.datetime.now(dt.timezone.utc)
-    lm = resp.headers.get("Last-Modified")
-    if lm:
-        try:
-            ts_utc = parsedate_to_datetime(lm).astimezone(dt.timezone.utc)
-        except Exception:
-            pass
+    if headers_out is not None:
+        lm = headers_out.get("Last-Modified")
+        if lm:
+            try:
+                ts_utc = parsedate_to_datetime(lm).astimezone(dt.timezone.utc)
+            except Exception:
+                pass
 
     return data, ts_utc, url

@@ -73,10 +73,34 @@ function Resolve-PythonExe([string]$Preferred) {
     throw "python not found in PATH. Install Python 3.11+ or pass -PythonExe with the real python path."
   }
 
+  # Prefer a Python that already has Pillow
   foreach ($e in $resolved) {
     if (Test-PythonHasPillow $e) { return $e }
   }
-  return $resolved[0]
+
+  # No Python has Pillow — auto-install into the first available Python
+  $target = $resolved[0]
+  Write-Host "Pillow not found. Installing Pillow into: $target ..."
+  try {
+    & $target -m pip install --quiet Pillow 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0 -and (Test-PythonHasPillow $target)) {
+      Write-Host "Pillow installed successfully."
+      return $target
+    }
+  } catch {}
+
+  try {
+    Write-Host "Trying ensurepip..."
+    & $target -m ensurepip --upgrade 2>&1 | Out-Null
+    & $target -m pip install --quiet Pillow 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0 -and (Test-PythonHasPillow $target)) {
+      Write-Host "Pillow installed successfully (via ensurepip)."
+      return $target
+    }
+  } catch {}
+
+  Write-Host "Warning: Could not auto-install Pillow. Run:  $target -m pip install Pillow"
+  return $target
 }
 
 $exe = Resolve-PythonExe $PythonExe

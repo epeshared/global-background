@@ -12,6 +12,7 @@ from io import BytesIO
 
 try:
     from PIL import Image  # type: ignore
+    Image.MAX_IMAGE_PIXELS = 200_000_000  # allow FY-4B GCLR (~131M pixels)
 except Exception:  # Pillow not installed
     Image = None  # type: ignore
 
