@@ -19,7 +19,7 @@ if (-not (Test-Path $PythonExe)) {
   throw "Python executable not found: $PythonExe"
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 
 Push-Location $repoRoot
 try {

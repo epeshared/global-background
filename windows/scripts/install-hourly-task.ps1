@@ -2,12 +2,13 @@ param(
   [string]$ConfigPath = "config.toml",
   [string]$TaskName = "GlobalBackground",
   [string]$PythonExe = "",
+  [string]$ProxyServer = "http://child-prc.intel.com:913",
   [switch]$RunNow
 )
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $configAbs = Join-Path $repoRoot $ConfigPath
 if (-not (Test-Path $configAbs)) {
   throw "Config file not found: $configAbs"
@@ -85,9 +86,9 @@ public class DpiHelper {
 
 # ---- Install scheduled task ----
 if ($PythonExe) {
-  & $installScript -ConfigPath $ConfigPath -TaskName $TaskName -IntervalMinutes 60 -PythonExe $PythonExe
+  & $installScript -ConfigPath $ConfigPath -TaskName $TaskName -IntervalMinutes 60 -PythonExe $PythonExe -ProxyServer $ProxyServer
 } else {
-  & $installScript -ConfigPath $ConfigPath -TaskName $TaskName -IntervalMinutes 60
+  & $installScript -ConfigPath $ConfigPath -TaskName $TaskName -IntervalMinutes 60 -ProxyServer $ProxyServer
 }
 
 if ($RunNow) {

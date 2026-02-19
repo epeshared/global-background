@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  global-background launchd agent template.
+  Placeholders are replaced by install.sh:
+    __PYTHON_EXE__   → path to python3
+    __CONFIG_PATH__  → absolute path to config.toml
+    __SRC_PATH__     → absolute path to src/
+    __WORK_DIR__     → project root
+    __LOG_DIR__      → logs directory
+    __INTERVAL__     → interval in seconds (default 3600)
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.global-background</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_EXE__</string>
+        <string>-m</string>
+        <string>global_background</string>
+        <string>once</string>
+        <string>--config</string>
+        <string>__CONFIG_PATH__</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>__SRC_PATH__</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__WORK_DIR__</string>
+
+    <!-- Run every N seconds (default: 3600 = 60 minutes) -->
+    <key>StartInterval</key>
+    <integer>__INTERVAL__</integer>
+
+    <!-- Also run immediately when the agent is loaded -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Logging -->
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/global-background.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/global-background.err</string>
+
+    <!-- Don't restart if the process exits normally -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Allow the process to run for up to 10 minutes -->
+    <key>TimeOut</key>
+    <integer>600</integer>
+</dict>
+</plist>

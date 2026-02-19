@@ -1,11 +1,37 @@
 ## global-background
 
-Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIBS 的近实时地球卫星底图拉取你所在地附近的影像，生成壁纸并设置到 Windows。
+跨平台（Windows / macOS）壁纸自动更新工具：每隔一段可配置的时间，从实时地球卫星图源拉取影像，生成壁纸并设置到桌面。
 
-### 1) 环境准备（Windows）
+支持多种卫星数据源：FY-4（中国风云四号，中国视角最佳）、Himawari、GK2A (SLIDER)、GOES、NASA GIBS、ESRI。
 
-- 安装 Python 3.11+（64 位），并确保 `python` 在 PATH
-- （推荐）安装 Git 与 VS Code
+### 项目结构
+
+```
+src/global_background/        ← 共享 Python 代码（所有卫星源、配置、图像处理）
+  platform/                   ← 平台抽象层
+    __init__.py               ← 自动检测 OS，分发到对应实现
+    windows.py                ← Windows: 壁纸(winreg) + 屏幕(DPI-aware)
+    macos.py                  ← macOS: 壁纸(osascript/AppKit) + 屏幕
+  fy4.py, slider.py, ...      ← 卫星数据源（跨平台共享）
+  pipeline.py, config.py, ... ← 核心流水线（跨平台共享）
+
+windows/scripts/              ← Windows 一键部署脚本
+  install-hourly-task.cmd     ← 双击一键安装
+  install-task.ps1, ...
+
+macos/scripts/                ← macOS 一键部署脚本
+  install.sh                  ← 一键安装
+  install.command             ← 双击安装（在 Finder 中打开 Terminal）
+  run-once.sh, uninstall.sh
+macos/launchd/                ← launchd agent 模板
+```
+
+### 1) 环境准备
+
+- Python 3.11+（64 位）
+- （推荐）Git 与 VS Code
+
+**Windows：** 确保 `python` 在 PATH。
 
 如果你运行 `where python` 看到的是：
 
@@ -136,59 +162,70 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 >
 > 1. 🔍 **自动查找 Python** — 扫描 PATH 和常见安装路径，找到可用的 Python 3
 > 2. 📦 **自动安装 Pillow** — 如果找到的 Python 没有 Pillow，自动运行 `pip install Pillow`（含 `ensurepip` 兜底）
-> 3. 🖥️ **自动检测屏幕分辨率** — 使用 DPI-aware Win32 API 读取主显示器真实分辨率，写入 `config.toml`
-> 4. ⏰ **注册 Windows 计划任务** — 每 60 分钟自动拉取最新卫星图并设为壁纸
+> 3. 🖥️ **自动检测屏幕分辨率** — 读取主显示器真实分辨率，写入 `config.toml`
+> 4. ⏰ **注册定时任务** — 每 60 分钟自动拉取最新卫星图并设为壁纸
 > 5. 🚀 **立即执行一次** — 安装完成后马上更新壁纸，无需等待下一个整点
 
-#### 一键安装步骤
+#### Windows 一键安装
 
 1. 复制配置文件：`copy config.example.toml config.toml`
 2. （可选）编辑 `config.toml` 选择你喜欢的卫星源和参数
-3. **双击 `scripts\install-hourly-task.cmd`** — 搞定！
+3. **双击 `windows\scripts\install-hourly-task.cmd`** — 搞定！
 
-> 💡 **无需手动安装 Pillow、无需手动填写分辨率、无需手动指定 Python 路径。** 脚本会自动处理一切。
+> 脚本使用 DPI-aware Win32 API 检测分辨率，注册 Windows Scheduled Task。
+
+#### macOS 一键安装
+
+1. 复制配置文件：`cp config.example.toml config.toml`
+2. （可选）编辑 `config.toml`
+3. 运行：`bash macos/scripts/install.sh`
+4. 或者**双击 `macos/scripts/install.command`**（会自动打开 Terminal 执行）
+
+> 脚本通过 `system_profiler` / `AppKit` 检测分辨率，注册 launchd agent。
+
+> 💡 **无需手动安装 Pillow、无需手动填写分辨率、无需手动指定 Python 路径。** 两个平台的脚本都会自动处理一切。
 
 如果你的机器上完全没有 Python，需要先安装 [python.org](https://www.python.org/downloads/) 的 Python 3.11+。
 
 ---
 
-#### 进阶用法
+#### 进阶用法（Windows）
 
 计划任务模式会每 N 分钟运行一次 `once`（执行完就退出），比常驻进程更稳定。
 
-一键脚本都在 `scripts\` 下，支持两种运行方式：
+一键脚本在 `windows\scripts\` 下，支持两种运行方式：
 
 - 方式 A（推荐）：直接双击 `.cmd` — 完全零配置
 - 方式 B：PowerShell 运行 `.ps1` — 可自定义参数（命令示例见下方）
 
 #### 手动跑一次（不装任务）
 
-`powershell -ExecutionPolicy Bypass -File scripts\run-once.ps1 -ConfigPath config.toml`
+`powershell -ExecutionPolicy Bypass -File windows\scripts\run-once.ps1 -ConfigPath config.toml`
 
 > `run-once.ps1` 同样支持自动安装 Pillow — 如果找不到带 Pillow 的 Python，会自动 `pip install`。
 
 仅生成图片不设置壁纸（调试用）：
 
-`powershell -ExecutionPolicy Bypass -File scripts\run-once.ps1 -ConfigPath config.toml -DryRun`
+`powershell -ExecutionPolicy Bypass -File windows\scripts\run-once.ps1 -ConfigPath config.toml -DryRun`
 
 安装/更新任务：
 
-`powershell -ExecutionPolicy Bypass -File scripts\\install-task.ps1 -ConfigPath config.toml -IntervalMinutes 30`
+`powershell -ExecutionPolicy Bypass -File windows\\scripts\\install-task.ps1 -ConfigPath config.toml -IntervalMinutes 30`
 
 每小时更新一次：
 
-- PowerShell：`powershell -ExecutionPolicy Bypass -File scripts\\install-hourly-task.ps1 -ConfigPath config.toml`
-- 或双击：`scripts\\install-hourly-task.cmd`
+- PowerShell：`powershell -ExecutionPolicy Bypass -File windows\\scripts\\install-hourly-task.ps1 -ConfigPath config.toml`
+- 或双击：`windows\\scripts\\install-hourly-task.cmd`
 
 安装后立刻跑一次（可选）：
 
-`powershell -ExecutionPolicy Bypass -File scripts\\install-hourly-task.ps1 -ConfigPath config.toml -RunNow`
+`powershell -ExecutionPolicy Bypass -File windows\\scripts\\install-hourly-task.ps1 -ConfigPath config.toml -RunNow`
 
 如果“任务运行了但壁纸没变化”，优先看日志：`logs\\task-run.latest.log`（常见原因是企业代理把 Himawari 资源替换成占位图/拦截页）。
 
 如果需要指定 Python 路径：
 
-`powershell -ExecutionPolicy Bypass -File scripts\\install-task.ps1 -ConfigPath config.toml -IntervalMinutes 30 -PythonExe C:\\Path\\To\\python.exe`
+`powershell -ExecutionPolicy Bypass -File windows\\scripts\\install-task.ps1 -ConfigPath config.toml -IntervalMinutes 30 -PythonExe C:\\Path\\To\\python.exe`
 
 立即运行一次：
 
@@ -196,18 +233,43 @@ Windows 壁纸自动更新工具：每隔一段可配置的时间，从 NASA GIB
 
 停止正在运行的任务（不删除）：
 
-- PowerShell：`powershell -ExecutionPolicy Bypass -File scripts\\stop-task.ps1`
-- 或双击：`scripts\\stop-task.cmd`
+- PowerShell：`powershell -ExecutionPolicy Bypass -File windows\\scripts\\stop-task.ps1`
+- 或双击：`windows\\scripts\\stop-task.cmd`
 
 停止并禁用任务（保留但不再按小时触发）：
 
-`powershell -ExecutionPolicy Bypass -File scripts\\stop-task.ps1 -Disable`
+`powershell -ExecutionPolicy Bypass -File windows\\scripts\\stop-task.ps1 -Disable`
 
 如果你想恢复（重新启用）：直接重新运行安装脚本即可（`install-hourly-task` 或 `install-task` 会覆盖更新任务）。
 
 卸载任务：
 
-`powershell -ExecutionPolicy Bypass -File scripts\\uninstall-task.ps1`
+`powershell -ExecutionPolicy Bypass -File windows\\scripts\\uninstall-task.ps1`
+
+#### 进阶用法（macOS）
+
+手动跑一次（不装 agent）：
+
+`bash macos/scripts/run-once.sh`
+
+仅生成图片不设置壁纸：
+
+`bash macos/scripts/run-once.sh --dry-run`
+
+查看 launchd agent 状态：
+
+`launchctl list | grep global-background`
+
+查看日志：
+
+`cat logs/global-background.log`
+`cat logs/global-background.err`
+
+卸载 agent：
+
+`bash macos/scripts/uninstall.sh`
+
+> 💡 macOS 上壁纸缩放方式默认使用系统当前偏好设置。如果安装了 PyObjC (`pip install pyobjc-framework-Cocoa`)，脚本支持通过 config 的 `wallpaper.style` 控制缩放模式（fill/fit/stretch/center）。
 
 ### 说明
 

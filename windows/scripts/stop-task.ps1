@@ -22,4 +22,4 @@ if ($Disable) {
   }
 }
 
-Write-Host "Done. (Note: uninstall/delete uses scripts\\uninstall-task.ps1)"
+Write-Host "Done. (Note: uninstall/delete uses windows\\scripts\\uninstall-task.ps1)"

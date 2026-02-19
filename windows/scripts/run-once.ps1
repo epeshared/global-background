@@ -1,13 +1,12 @@
 param(
   [string]$ConfigPath = "config.toml",
-  [string]$TaskName = "GlobalBackground",
-  [int]$IntervalMinutes = 30,
+  [switch]$DryRun,
   [string]$PythonExe = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $configAbs = Resolve-Path (Join-Path $repoRoot $ConfigPath)
 
 function Test-PythonRunnable([string]$Candidate) {
@@ -23,7 +22,7 @@ function Test-PythonRunnable([string]$Candidate) {
 
 function Test-PythonHasPillow([string]$ExePath) {
   try {
-    & $ExePath -c "import PIL" 1>$null 2>$null
+    & $ExePath -c "import PIL; import sys; print(sys.executable)" 1>$null 2>$null
     return ($LASTEXITCODE -eq 0)
   } catch {
     return $false
@@ -57,6 +56,7 @@ function Resolve-PythonExe([string]$Preferred) {
     if ($exe1) { $resolved += $exe1 }
   }
 
+  # Common python.org installs
   $local312 = Join-Path $env:LocalAppData "Programs\Python\Python312\python.exe"
   if (Test-Path $local312) {
     $exe2 = Test-PythonRunnable $local312
@@ -70,7 +70,7 @@ function Resolve-PythonExe([string]$Preferred) {
 
   $resolved = $resolved | Select-Object -Unique
   if (-not $resolved -or $resolved.Count -eq 0) {
-    throw "python not found in PATH. Install Python 3.11+ and ensure it's on PATH."
+    throw "python not found in PATH. Install Python 3.11+ or pass -PythonExe with the real python path."
   }
 
   # Prefer a Python that already has Pillow
@@ -87,11 +87,8 @@ function Resolve-PythonExe([string]$Preferred) {
       Write-Host "Pillow installed successfully."
       return $target
     }
-  } catch {
-    # pip might not be available; try ensurepip first
-  }
+  } catch {}
 
-  # Fallback: try ensurepip then pip install
   try {
     Write-Host "Trying ensurepip..."
     & $target -m ensurepip --upgrade 2>&1 | Out-Null
@@ -100,43 +97,23 @@ function Resolve-PythonExe([string]$Preferred) {
       Write-Host "Pillow installed successfully (via ensurepip)."
       return $target
     }
-  } catch {
-    # ignore
-  }
+  } catch {}
 
-  Write-Host "Warning: Could not auto-install Pillow. Full-disk images may not be resized properly."
-  Write-Host "         Run manually:  $target -m pip install Pillow"
+  Write-Host "Warning: Could not auto-install Pillow. Run:  $target -m pip install Pillow"
   return $target
 }
+
 $exe = Resolve-PythonExe $PythonExe
 
-$pythonw = Join-Path (Split-Path $exe) "pythonw.exe"
-if (-not (Test-Path $pythonw)) {
-  $pythonw = $exe
-}
-
-# Use a small PowerShell entrypoint script to avoid fragile quoting.
-$taskRun = (Resolve-Path (Join-Path $PSScriptRoot "task-run.ps1")).Path
-
-# Create or update scheduled task using ScheduledTasks module (more reliable than schtasks quoting)
+Push-Location $repoRoot
 try {
-  Import-Module ScheduledTasks -ErrorAction Stop
-} catch {
-  throw "ScheduledTasks module not available. Please run on Windows 10/11 with built-in Scheduled Tasks support."
+  $env:PYTHONPATH = (Join-Path $repoRoot "src")
+  $pyParams = @("-m", "global_background", "once", "--config", $configAbs)
+  if ($DryRun) { $pyParams += "--dry-run" }
+  & $exe @pyParams
+  if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+  }
+} finally {
+  Pop-Location
 }
-
-$arg = "-NoProfile -ExecutionPolicy Bypass -File `"$taskRun`" -ConfigPath `"$configAbs`" -PythonExe `"$pythonw`""
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg -WorkingDirectory $repoRoot
-
-# Repeating trigger: run once starting soon, repeat every N minutes.
-# Note: Windows Task Scheduler caps repetition duration; we set a long duration and you can re-run this installer later to extend.
-$startAt = (Get-Date).AddMinutes(1)
-$trigger = New-ScheduledTaskTrigger -Once -At $startAt -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 365)
-
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-
-Write-Host "Installed scheduled task '$TaskName' (every $IntervalMinutes minutes)."
-Write-Host "Run now: schtasks /Run /TN $TaskName"
