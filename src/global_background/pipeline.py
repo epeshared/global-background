@@ -24,6 +24,7 @@ from .himawari import HimawariFullDiskRequest, fetch_latest_full_disk_png
 from .goes import GoesFullDiskRequest, fetch_latest_full_disk_jpg
 from .slider import SliderFullDiskRequest, fetch_latest_full_disk_png as fetch_slider_latest_full_disk_png
 from .fy4 import FY4FullDiskRequest, fetch_latest_full_disk_jpg as fetch_fy4_latest_full_disk_jpg
+from .validate import validate_satellite_image, ImageValidationError
 from .gibs import GibsRequest, fetch_wms_image_bytes, iter_recent_dates
 from .esri import EsriExportRequest, default_date as esri_date, default_label as esri_label, fetch_esri_world_imagery
 from .location import get_location_from_ip
@@ -217,6 +218,11 @@ def fetch_best_available(
             sat = (cfg.satellite.fy4_satellite or "").strip().upper()
             prod = (cfg.satellite.fy4_product or "").strip().upper()
             label = f"FY4_{sat}_{prod}"
+
+            # Validate downloaded image before processing
+            vr = validate_satellite_image(jpg, is_jpeg=True, min_bytes=50_000)
+            if not vr.valid:
+                raise ImageValidationError(f"FY-4 image validation failed: {vr.reason}")
 
             if Image is not None:
                 try:
