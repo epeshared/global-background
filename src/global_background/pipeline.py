@@ -116,6 +116,61 @@ def _nonblack_bbox_rgb(img, *, threshold: int = 10) -> tuple[int, int, int, int]
         return None
 
 
+def _replace_gray_band(img, *, gray_val: int = 128, tolerance: int = 12):
+    """Replace solid gray (128,128,128) bands from JPEG truncation with black.
+
+    Truncated JPEG decoding fills unprocessed regions with mid-gray.  This
+    function detects contiguous rows of uniform gray at the bottom of the image
+    (common with partially-downloaded satellite JPEGs) and replaces them with
+    black so they blend into the space background.
+    """
+    if Image is None:
+        return img
+    try:
+        from PIL import ImageDraw  # type: ignore
+
+        w, h = img.size
+        # Quick check: is the bottom-center pixel gray?
+        r, g, b = img.getpixel((w // 2, h - 1))[:3]
+        if not (abs(r - gray_val) <= tolerance and abs(g - gray_val) <= tolerance and abs(b - gray_val) <= tolerance):
+            return img  # bottom is not gray — nothing to fix
+
+        # Scan upward from bottom to find where the gray band starts.
+        # Sample 5 columns to avoid false positives from a single gray pixel.
+        sample_xs = [w // 6, w // 3, w // 2, 2 * w // 3, 5 * w // 6]
+        gray_top = h  # will be set to the first non-gray row
+
+        for y in range(h - 1, -1, -1):
+            all_gray = True
+            for sx in sample_xs:
+                r, g, b = img.getpixel((sx, y))[:3]
+                if not (abs(r - gray_val) <= tolerance and abs(g - gray_val) <= tolerance and abs(b - gray_val) <= tolerance):
+                    all_gray = False
+                    break
+            if not all_gray:
+                gray_top = y + 1
+                break
+
+        if gray_top >= h:
+            return img  # entire image is gray (catastrophic) — return as-is
+
+        gray_height = h - gray_top
+        if gray_height < 4:
+            return img  # negligible
+
+        # Paint the gray band black
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, gray_top, w - 1, h - 1], fill=(0, 0, 0))
+
+        print(
+            f"[global-background] Replaced gray band (y={gray_top}..{h-1}, {gray_height}px) with black.",
+            file=__import__("sys").stderr,
+        )
+        return img
+    except Exception:
+        return img
+
+
 def _fit_paste_xy(
     *, target_w: int, target_h: int, src_w: int, src_h: int, scale: float, content_bbox: tuple[int, int, int, int] | None
 ) -> tuple[int, int]:
@@ -167,6 +222,9 @@ def fetch_best_available(
                 try:
                     img = Image.open(BytesIO(jpg)).convert("RGB")
                     img.load()
+
+                    # Fix gray bands from truncated JPEG downloads
+                    img = _replace_gray_band(img)
 
                     src_w, src_h = img.size
                     target_w, target_h = int(cfg.image.width), int(cfg.image.height)

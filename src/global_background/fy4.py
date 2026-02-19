@@ -24,6 +24,10 @@ from urllib.request import Request, urlopen
 from .system_proxy import system_proxy_env_for_url
 
 
+class _DownloadTruncatedError(Exception):
+    """Raised when a FY-4 download is incomplete (missing bytes or JPEG EOI marker)."""
+
+
 # ---------------------------------------------------------------------------
 # Known endpoints
 # ---------------------------------------------------------------------------
@@ -68,8 +72,10 @@ def fetch_latest_full_disk_jpg(
 
     url = _resolve_url(req)
 
-    max_retries = 3
+    max_retries = 5
     chunk_size = 256 * 1024  # 256 KB chunks
+
+    _JPEG_EOI = b"\xff\xd9"
 
     last_exc: Exception | None = None
     headers_out = None
@@ -88,6 +94,7 @@ def fetch_latest_full_disk_jpg(
             with system_proxy_env_for_url(url):
                 with urlopen(http_req, timeout=float(timeout_s)) as resp:
                     headers_out = resp.headers
+                    expected_len = resp.headers.get("Content-Length")
                     chunks: list[bytes] = []
                     while True:
                         chunk = resp.read(chunk_size)
@@ -99,8 +106,41 @@ def fetch_latest_full_disk_jpg(
             if not data or len(data) < 10_000:
                 raise RuntimeError(f"FY-4 response too small ({len(data)} bytes), likely a placeholder")
 
-            # Success
+            # --- Integrity checks ---
+            # 1) Content-Length mismatch
+            if expected_len is not None:
+                expected = int(expected_len)
+                if len(data) < expected:
+                    raise _DownloadTruncatedError(
+                        f"FY-4 download truncated: got {len(data):,} / {expected:,} bytes "
+                        f"({len(data)*100//expected}%)"
+                    )
+
+            # 2) JPEG must end with FFD9 (End-of-Image marker)
+            if not data.endswith(_JPEG_EOI):
+                # Allow if FFD9 exists near the end (some servers append trailing whitespace)
+                tail = data[-16:]
+                if _JPEG_EOI not in tail:
+                    raise _DownloadTruncatedError(
+                        f"FY-4 JPEG incomplete: missing FFD9 end marker "
+                        f"(got {len(data):,} bytes, tail={data[-4:].hex()})"
+                    )
+
+            # Success — download is complete
             break
+        except _DownloadTruncatedError as exc:
+            last_exc = exc
+            import time, sys as _sys
+            print(
+                f"[global-background] FY-4 download truncated (attempt {attempt+1}/{max_retries}): {exc}",
+                file=_sys.stderr,
+            )
+            if attempt < max_retries - 1:
+                time.sleep(3 * (attempt + 1))
+                continue
+            raise RuntimeError(
+                f"FY-4 download still truncated after {max_retries} attempts: {exc}"
+            ) from exc
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries - 1:

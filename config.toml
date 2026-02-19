@@ -47,8 +47,8 @@ half_width_km = 250
 half_height_km = 140
 
 [image]
-width = 3440
-height = 1440
+width = 1920
+height = 1080
 format = "jpg"   # jpg or png
 quality = 92
 
