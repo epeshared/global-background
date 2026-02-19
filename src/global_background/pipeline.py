@@ -11,8 +11,9 @@ from pathlib import Path
 from io import BytesIO
 
 try:
-    from PIL import Image  # type: ignore
+    from PIL import Image, ImageFile  # type: ignore
     Image.MAX_IMAGE_PIXELS = 200_000_000  # allow FY-4B GCLR (~131M pixels)
+    ImageFile.LOAD_TRUNCATED_IMAGES = True  # tolerate slightly truncated satellite JPEGs
 except Exception:  # Pillow not installed
     Image = None  # type: ignore
 
@@ -220,8 +221,12 @@ def fetch_best_available(
                         return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg")
                     img.save(buf, format="PNG", optimize=True)
                     return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png")
-                except Exception:
-                    pass
+                except Exception as img_exc:
+                    print(
+                        f"[global-background] FY-4 image transform failed, returning raw image. "
+                        f"Reason: {img_exc!r}",
+                        file=sys.stderr,
+                    )
 
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=jpg, content_ext=".jpg")
         except Exception as exc:
@@ -317,8 +322,12 @@ def fetch_best_available(
                         return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg")
                     img.save(buf, format="PNG", optimize=True)
                     return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png")
-                except Exception:
-                    pass
+                except Exception as img_exc:
+                    print(
+                        f"[global-background] SLIDER image transform failed, returning raw image. "
+                        f"Reason: {img_exc!r}",
+                        file=sys.stderr,
+                    )
 
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=png, content_ext=".png")
         except Exception as exc:
@@ -411,8 +420,12 @@ def fetch_best_available(
                         return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".jpg")
                     img.save(buf, format="PNG", optimize=True)
                     return FetchResult(layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png")
-                except Exception:
-                    pass
+                except Exception as img_exc:
+                    print(
+                        f"[global-background] Himawari image transform failed, returning raw image. "
+                        f"Reason: {img_exc!r}",
+                        file=sys.stderr,
+                    )
 
             # No Pillow: keep the original JPG.
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=jpg, content_ext=".jpg")
@@ -519,8 +532,12 @@ def fetch_best_available(
                         return FetchResult(
                             layer=label, date=ts_utc.date(), image_bytes=buf.getvalue(), content_ext=".png"
                         )
-                except Exception:
-                    pass
+                except Exception as img_exc:
+                    print(
+                        f"[global-background] GOES image transform failed, returning raw image. "
+                        f"Reason: {img_exc!r}",
+                        file=sys.stderr,
+                    )
 
             # Fallback: return the original payload as PNG.
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=png, content_ext=".png")
