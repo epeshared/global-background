@@ -293,6 +293,8 @@ def fetch_best_available(
                     )
 
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=jpg, content_ext=".jpg")
+        except ImageValidationError:
+            raise  # Don't fall back — let caller retry
         except Exception as exc:
             last_exc = exc
             print(
