@@ -66,10 +66,10 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 run_once(cfg, dry_run=bool(args.dry_run))
                 return 0
-            except ImageValidationError as exc:
+            except Exception as exc:
                 import sys as _sys
                 print(
-                    f"[global-background] Image validation failed (attempt {attempt}/{_VALIDATION_MAX_RETRIES}): {exc}",
+                    f"[global-background] Fetch failed (attempt {attempt}/{_VALIDATION_MAX_RETRIES}): {exc}",
                     file=_sys.stderr,
                 )
                 if attempt < _VALIDATION_MAX_RETRIES:
@@ -88,33 +88,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         while True:
             start = time.time()
-            try:
-                # Inner retry loop for validation failures
-                for attempt in range(1, _VALIDATION_MAX_RETRIES + 1):
-                    try:
-                        run_once(cfg, dry_run=bool(args.dry_run))
-                        break  # success
-                    except ImageValidationError as exc:
-                        import sys as _sys
+            for attempt in range(1, _VALIDATION_MAX_RETRIES + 1):
+                try:
+                    run_once(cfg, dry_run=bool(args.dry_run))
+                    break  # success
+                except Exception as exc:
+                    import sys as _sys
+                    print(
+                        f"[global-background] Fetch failed (attempt {attempt}/{_VALIDATION_MAX_RETRIES}): {exc}",
+                        file=_sys.stderr,
+                    )
+                    # Log to file
+                    out_dir = Path(cfg.output_dir)
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    (out_dir / "errors.log").write_text(
+                        f"attempt {attempt}: {exc!r}\n", encoding="utf-8"
+                    )
+                    if attempt < _VALIDATION_MAX_RETRIES:
                         print(
-                            f"[global-background] Image validation failed (attempt {attempt}/{_VALIDATION_MAX_RETRIES}): {exc}",
+                            f"[global-background] Wallpaper NOT updated. Retrying in {_VALIDATION_RETRY_INTERVAL_S}s...",
                             file=_sys.stderr,
                         )
-                        if attempt < _VALIDATION_MAX_RETRIES:
-                            print(
-                                f"[global-background] Wallpaper NOT updated. Retrying in {_VALIDATION_RETRY_INTERVAL_S}s...",
-                                file=_sys.stderr,
-                            )
-                            time.sleep(_VALIDATION_RETRY_INTERVAL_S)
-                        else:
-                            print(
-                                f"[global-background] All {_VALIDATION_MAX_RETRIES} attempts failed. Wallpaper NOT updated this cycle.",
-                                file=_sys.stderr,
-                            )
-            except Exception as exc:
-                out_dir = Path(cfg.output_dir)
-                out_dir.mkdir(parents=True, exist_ok=True)
-                (out_dir / "errors.log").write_text(f"{exc!r}\n", encoding="utf-8")
+                        time.sleep(_VALIDATION_RETRY_INTERVAL_S)
+                    else:
+                        print(
+                            f"[global-background] All {_VALIDATION_MAX_RETRIES} attempts failed. Wallpaper NOT updated this cycle.",
+                            file=_sys.stderr,
+                        )
 
             elapsed = time.time() - start
             sleep_s = max(5.0, cfg.update_interval_minutes * 60.0 - elapsed)

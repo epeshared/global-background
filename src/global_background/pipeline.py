@@ -296,12 +296,12 @@ def fetch_best_available(
         except ImageValidationError:
             raise  # Don't fall back — let caller retry
         except Exception as exc:
-            last_exc = exc
-            print(
-                "[global-background] FY-4 fetch failed; falling back to SLIDER/GOES/Himawari/GIBS/ESRI. "
-                f"Reason: {exc!r}",
-                file=sys.stderr,
-            )
+            # User explicitly chose provider="fy4" — do NOT silently fall back
+            # to GIBS/VIIRS flat maps. Re-raise so cli.py retries with the same provider.
+            raise RuntimeError(
+                f"FY-4 fetch failed: {exc!r}. "
+                f"Will not fall back to other providers because provider='fy4' is configured."
+            ) from exc
 
     if cfg.satellite.provider == "slider":
         if Image is None:
@@ -397,12 +397,10 @@ def fetch_best_available(
 
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=png, content_ext=".png")
         except Exception as exc:
-            last_exc = exc
-            print(
-                "[global-background] SLIDER fetch failed; falling back to GOES/Himawari/GIBS/ESRI. "
-                f"Reason: {exc!r}",
-                file=sys.stderr,
-            )
+            raise RuntimeError(
+                f"SLIDER fetch failed: {exc!r}. "
+                f"Will not fall back to other providers because provider='slider' is configured."
+            ) from exc
 
     if cfg.satellite.provider == "goes":
         if Image is None:
@@ -496,12 +494,10 @@ def fetch_best_available(
             # No Pillow: keep the original JPG.
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=jpg, content_ext=".jpg")
         except Exception as exc:
-            last_exc = exc
-            print(
-                "[global-background] GOES fetch failed; falling back to Himawari/GIBS/ESRI. "
-                f"Reason: {exc!r}",
-                file=sys.stderr,
-            )
+            raise RuntimeError(
+                f"GOES fetch failed: {exc!r}. "
+                f"Will not fall back to other providers because provider='goes' is configured."
+            ) from exc
 
     if cfg.satellite.provider == "himawari":
         if Image is None:
@@ -608,12 +604,10 @@ def fetch_best_available(
             # Fallback: return the original payload as PNG.
             return FetchResult(layer=label, date=ts_utc.date(), image_bytes=png, content_ext=".png")
         except Exception as exc:
-            last_exc = exc
-            print(
-                "[global-background] Himawari fetch failed; falling back to GIBS/ESRI. "
-                f"Reason: {exc!r}",
-                file=sys.stderr,
-            )
+            raise RuntimeError(
+                f"Himawari fetch failed: {exc!r}. "
+                f"Will not fall back to other providers because provider='himawari' is configured."
+            ) from exc
 
     if cfg.region.mode == "globe":
         # Always fetch a global equirectangular map as the source for globe rendering.
