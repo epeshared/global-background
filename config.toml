@@ -9,9 +9,9 @@ auto_location = true
 [network]
 # If you are behind a corporate proxy, set these.
 # Example: "http://proxy.mycorp.com:8080"
-https_proxy = ""
-http_proxy = ""
-timeout_s = 120
+https_proxy = "http://child-prc.intel.com:913"
+http_proxy = "http://child-prc.intel.com:913"
+timeout_s = 300
 
 [region]
 # local: use a bbox around (lat, lon)
@@ -47,8 +47,8 @@ half_width_km = 250
 half_height_km = 140
 
 [image]
-width = 3440
-height = 1440
+width = 1920
+height = 1080
 format = "jpg"   # jpg or png
 quality = 92
 
@@ -100,12 +100,9 @@ full_disk_scale = 0.75
 
 # GOES (NOAA) full-disk true-color (earth disc):
 # This is often reachable even when Himawari tiles are blocked.
-# provider = "goes"
-# goes_satellite = "GOES18"   # GOES18 (west) or GOES16 (east)
-# goes_product = "GEOCOLOR"  # true-color composite
-# goes_size = 5424            # 678|1808|5424|10848 (bigger = more bandwidth)
-# # Reuse himawari_layout for full-disk providers:
-# himawari_layout = "fit"
+goes_satellite = "GOES18"   # GOES18 (west) or GOES16 (east)
+goes_product = "GEOCOLOR"  # true-color composite
+goes_size = 1808            # 678|1808|5424|10848 (bigger = more bandwidth)
 
 [wallpaper]
 style = "fill"   # fill | fit | stretch | center | span
