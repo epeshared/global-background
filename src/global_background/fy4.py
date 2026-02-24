@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
+from typing import Final
 from urllib.request import Request, urlopen
 
 from .system_proxy import system_proxy_env_for_url
@@ -75,56 +76,133 @@ def fetch_latest_full_disk_jpg(
     max_retries = 5
     chunk_size = 256 * 1024  # 256 KB chunks
 
-    _JPEG_EOI = b"\xff\xd9"
+    _JPEG_EOI: Final[bytes] = b"\xff\xd9"
 
     last_exc: Exception | None = None
     headers_out = None
 
-    for attempt in range(max_retries):
-        try:
-            http_req = Request(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) global-background/0.1",
-                    "Cache-Control": "no-cache",
-                    "Pragma": "no-cache",
-                },
-            )
+    def _read_all(resp) -> bytes:
+        chunks: list[bytes] = []
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
 
-            with system_proxy_env_for_url(url):
-                with urlopen(http_req, timeout=float(timeout_s)) as resp:
-                    headers_out = resp.headers
-                    expected_len = resp.headers.get("Content-Length")
-                    chunks: list[bytes] = []
-                    while True:
-                        chunk = resp.read(chunk_size)
-                        if not chunk:
-                            break
-                        chunks.append(chunk)
-                    data = b"".join(chunks)
+    def _parse_int_header(val: str | None) -> int | None:
+        if val is None:
+            return None
+        try:
+            return int(val)
+        except Exception:
+            return None
+
+    def _download_with_resume(url0: str) -> tuple[bytes, object]:
+        """Download bytes, resuming with Range/If-Range if truncated.
+
+        Returns (data, headers). Raises _DownloadTruncatedError on failure.
+        """
+
+        base_headers: dict[str, str] = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) global-background/0.1",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            # Some enterprise proxies/servers behave better without keep-alive.
+            "Connection": "close",
+        }
+
+        with system_proxy_env_for_url(url0):
+            # First request
+            first_req = Request(url0, headers=base_headers)
+            with urlopen(first_req, timeout=float(timeout_s)) as resp:
+                headers = resp.headers
+                expected = _parse_int_header(headers.get("Content-Length"))
+                etag = headers.get("ETag")
+                last_modified = headers.get("Last-Modified")
+                data = _read_all(resp)
 
             if not data or len(data) < 10_000:
                 raise RuntimeError(f"FY-4 response too small ({len(data)} bytes), likely a placeholder")
 
-            # --- Integrity checks ---
-            # 1) Content-Length mismatch
-            if expected_len is not None:
-                expected = int(expected_len)
-                if len(data) < expected:
-                    raise _DownloadTruncatedError(
-                        f"FY-4 download truncated: got {len(data):,} / {expected:,} bytes "
-                        f"({len(data)*100//expected}%)"
-                    )
+            def _looks_complete(buf: bytes, expected_len: int | None) -> bool:
+                if expected_len is not None and len(buf) < expected_len:
+                    return False
+                if buf.endswith(_JPEG_EOI):
+                    return True
+                tail = buf[-16:]
+                return _JPEG_EOI in tail
 
-            # 2) JPEG must end with FFD9 (End-of-Image marker)
-            if not data.endswith(_JPEG_EOI):
-                # Allow if FFD9 exists near the end (some servers append trailing whitespace)
-                tail = data[-16:]
-                if _JPEG_EOI not in tail:
-                    raise _DownloadTruncatedError(
-                        f"FY-4 JPEG incomplete: missing FFD9 end marker "
-                        f"(got {len(data):,} bytes, tail={data[-4:].hex()})"
-                    )
+            if _looks_complete(data, expected):
+                return data, headers
+
+            # If server told us the size, try resuming missing bytes.
+            # If it didn't, we can still try a limited number of resume attempts
+            # until we see the JPEG EOI marker.
+            max_resume_requests = 5
+            for _ in range(max_resume_requests):
+                start = len(data)
+                if expected is not None and start >= expected:
+                    break
+
+                resume_headers = dict(base_headers)
+                resume_headers["Range"] = f"bytes={start}-"
+                # Prevent mixing bytes across different "latest" images.
+                if etag:
+                    resume_headers["If-Range"] = etag
+                elif last_modified:
+                    resume_headers["If-Range"] = last_modified
+
+                resume_req = Request(url0, headers=resume_headers)
+                with urlopen(resume_req, timeout=float(timeout_s)) as resp2:
+                    # If server/proxy ignores Range, it may return 200 with full content.
+                    # In that case, replace buffer and restart completeness check.
+                    code = getattr(resp2, "status", None)
+                    headers2 = resp2.headers
+
+                    # Update metadata if present.
+                    if headers2.get("ETag"):
+                        etag = headers2.get("ETag")
+                    if headers2.get("Last-Modified"):
+                        last_modified = headers2.get("Last-Modified")
+
+                    # Content-Length for 206 is the remaining bytes, not total.
+                    # Content-Range includes total: bytes start-end/total
+                    cr = headers2.get("Content-Range")
+                    if cr and "/" in cr:
+                        try:
+                            total = int(cr.split("/")[-1].strip())
+                            if total > 0:
+                                expected = total
+                        except Exception:
+                            pass
+                    elif expected is None:
+                        expected = _parse_int_header(headers2.get("Content-Length"))
+
+                    more = _read_all(resp2)
+
+                    if code == 200:
+                        data = more
+                    else:
+                        data += more
+
+                if _looks_complete(data, expected):
+                    return data, headers2
+
+            # Still incomplete after resume attempts
+            if expected is not None and len(data) < expected:
+                raise _DownloadTruncatedError(
+                    f"FY-4 download truncated: got {len(data):,} / {expected:,} bytes "
+                    f"({len(data)*100//expected}%)"
+                )
+            raise _DownloadTruncatedError(
+                f"FY-4 JPEG incomplete: missing FFD9 end marker "
+                f"(got {len(data):,} bytes, tail={data[-4:].hex()})"
+            )
+
+    for attempt in range(max_retries):
+        try:
+            data, headers_out = _download_with_resume(url)
 
             # Success — download is complete
             break

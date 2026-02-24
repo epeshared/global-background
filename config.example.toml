@@ -11,11 +11,11 @@ auto_location = true
 # Example: "http://proxy.mycorp.com:8080"
 https_proxy = ""
 http_proxy = ""
-timeout_s = 30
+timeout_s = 300
 
 [region]
 # local: use a bbox around (lat, lon)
-# country: use the whole country bbox (good for "国家云图")
+# country: use the whole country bbox (good for "鍥藉浜戝浘")
 mode = "local"  # local | country | globe
 # Optional override when mode="country". Format: [lat_min, lon_min, lat_max, lon_max]
 # country_bbox_latlon = [18.0, 73.0, 54.0, 135.0]
@@ -29,9 +29,9 @@ globe_render_width = 1920
 globe_render_height = 1080
 # Background for outside-the-globe area
 globe_background_style = "gradient"  # solid | gradient
-globe_background_rgb = [6, 16, 28]    # inner (near center)
-globe_background_rgb2 = [0, 0, 6]     # outer (near corners)
-globe_background_stars = true
+globe_background_rgb = [0, 0, 0]    # inner (near center)
+globe_background_rgb2 = [0, 0, 0]     # outer (near corners)
+globe_background_stars = false
 
 # Keep only recent outputs (by day folder name). With keep_days=1, only today's images remain.
 [retention]
@@ -47,21 +47,32 @@ half_width_km = 250
 half_height_km = 140
 
 [image]
-width = 3840
-height = 2160
-# You can also set width/height to 0 (or "auto") to use your primary screen resolution.
-# width = 0
-# height = 0
+width = 3440
+height = 1440
 format = "jpg"   # jpg or png
 quality = 92
 
 [satellite]
-provider = "gibs"  # gibs | himawari | goes | slider
+provider = "fy4"  # gibs | himawari | goes | slider | fy4
 layers = [
   "VIIRS_SNPP_CorrectedReflectance_TrueColor",
   "MODIS_Terra_CorrectedReflectance_TrueColor",
 ]
 max_days_back = 10
+
+# SLIDER (RAMMB/CIRA) tiled imagery
+# - GK2A + korea: Korea-centered regional cloud imagery
+# - GK2A + full_disk: Asia-friendly full-disk view (earth disk)
+slider_satellite = "gk2a"  # himawari | gk2a
+slider_sector = "full_disk"   # full_disk | korea
+slider_product = "geocolor"    # geocolor | natural_color | band_13 ...
+slider_max_level = 3           # 0..4 (higher = more detail + bandwidth)
+
+# FY-4 (NSMC) full-disk JPEG — China-centered (~104.7°E)
+# FY4A + mtcc: multi-channel true-colour composite (~2200x2200, ~800 KB, fast)
+# FY4B + gclr: AGRI geo-colour (~11000x12000, ~11 MB, high-res)
+fy4_satellite = "fy4b"  # fy4a | fy4b
+fy4_product = "gclr"    # mtcc (FY4A) | gclr (FY4B)
 
 # Himawari direct full-disk (infrared cloud image works day+night)
 himawari_product = "FULL_24h"
@@ -73,12 +84,11 @@ himawari_max_lookback_minutes = 240
 # Layout:
 # - fill: crop to fill the wallpaper (may cut off space around the disk)
 # - fit: keep the whole earth disk visible, letterbox with a space background
-himawari_layout = "fill"
+himawari_layout = "fit"
 
-# When using full-disk providers (Himawari/GOES) with himawari_layout="fit",
-# you can shrink/enlarge the disk on screen without changing its aspect.
+# In fit mode, shrink/enlarge the full-disk earth without cropping.
 # 1.0 = as large as possible; 0.75 = shrink by 25%.
-full_disk_scale = 1.0
+full_disk_scale = 0.75
 
 # Himawari true color (daytime only):
 # - Product: D531106
@@ -90,31 +100,9 @@ full_disk_scale = 1.0
 
 # GOES (NOAA) full-disk true-color (earth disc):
 # This is often reachable even when Himawari tiles are blocked.
-# provider = "goes"
-# goes_satellite = "GOES18"   # GOES18 (west) or GOES16 (east)
-# goes_product = "GEOCOLOR"  # true-color composite
-# goes_size = 5424            # 678|1808|5424|10848 (bigger = more bandwidth)
-# # Reuse himawari_layout for full-disk providers:
-# himawari_layout = "fit"
-
-# SLIDER (RAMMB/CIRA) full-disk (tiled) — often works well for Asia view:
-# provider = "slider"
-# slider_satellite = "himawari"  # himawari | gk2a
-# slider_sector = "full_disk"
-# slider_product = "geocolor"    # geocolor | natural_color | band_13 ...
-# slider_max_level = 3           # 0..4 (higher = more detail + bandwidth)
-# # Reuse himawari_layout/full_disk_scale for full-disk providers:
-# himawari_layout = "fit"
-
-# FY-4 (China's Fengyun-4, best China-centered full-disk view):
-# FY-4B is positioned at 104.7°E — China is right at the center of the disk.
-# Data source: NSMC (National Satellite Meteorological Center) img.nsmc.org.cn
-# provider = "fy4"
-# fy4_satellite = "fy4b"    # fy4a | fy4b (recommend fy4b for real-time)
-# fy4_product = "gclr"      # gclr (fy4b only, ~11MB 10992x11912) | mtcc (fy4a only, ~800KB 2198x2198)
-# himawari_layout = "fit"
-# full_disk_scale = 0.75
-# # Note: FY4B GCLR is ~11MB; increase timeout_s to 120 in [network]
+goes_satellite = "GOES18"   # GOES18 (west) or GOES16 (east)
+goes_product = "GEOCOLOR"  # true-color composite
+goes_size = 1808            # 678|1808|5424|10848 (bigger = more bandwidth)
 
 [wallpaper]
 style = "fill"   # fill | fit | stretch | center | span
