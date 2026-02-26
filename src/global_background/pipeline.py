@@ -196,6 +196,7 @@ def fetch_best_available(
     *,
     country_code: str | None = None,
     country_name: str | None = None,
+    target_utc: dt.datetime | None = None,
 ) -> FetchResult:
     last_exc: Exception | None = None
 
@@ -320,6 +321,7 @@ def fetch_best_available(
                 ),
                 timeout_s=float(cfg.network.timeout_s),
                 target_max_dim_px=max(int(cfg.image.width), int(cfg.image.height)),
+                target_utc=target_utc,
             )
 
             sat = (cfg.satellite.slider_satellite or "").strip().upper()
@@ -516,6 +518,7 @@ def fetch_best_available(
                 ),
                 timeout_s=float(cfg.network.timeout_s),
                 max_lookback_minutes=int(cfg.satellite.himawari_max_lookback_minutes),
+                target_utc=target_utc,
             )
             # label by UTC timestamp
             band = (cfg.satellite.himawari_band or "").strip()
@@ -930,3 +933,327 @@ def run_once(cfg: AppConfig, dry_run: bool = False) -> None:
 
     # Prefer BMP for compatibility when available.
     set_wallpaper((bmp_path or image_path), style=cfg.wallpaper.style)
+
+
+def run_hourly_slot(
+    cfg: AppConfig,
+    target_utc: dt.datetime,
+    *,
+    dry_run: bool = False,
+) -> tuple[Path, Path | None]:
+    """Download a satellite image for *target_utc* and save it to the hourly ring buffer.
+
+    Images are saved as:
+        {output_dir}/hourly/h{HH:02d}{ext}      e.g. h14.jpg
+        {output_dir}/hourly/h{HH:02d}.bmp        (if Pillow is available)
+
+    The slot is determined by ``target_utc.hour`` (UTC, 0–23).  Existing files in
+    that slot are overwritten, creating a rolling 24-slot ring buffer.
+
+    This function does NOT change the wallpaper — the slideshow player loop does that
+    after collecting images.  When *dry_run* is True the function still fetches and
+    saves (so the ring buffer is populated) but never touches the wallpaper.
+
+    Returns (image_path, bmp_path_or_None).
+    """
+    # ---- proxy setup (identical to run_once) ----
+    if cfg.network.https_proxy:
+        os.environ["HTTPS_PROXY"] = cfg.network.https_proxy
+        os.environ["https_proxy"] = cfg.network.https_proxy
+    if cfg.network.http_proxy:
+        os.environ["HTTP_PROXY"] = cfg.network.http_proxy
+        os.environ["http_proxy"] = cfg.network.http_proxy
+    if (
+        not cfg.network.http_proxy
+        and not cfg.network.https_proxy
+        and not os.environ.get("HTTP_PROXY")
+        and not os.environ.get("HTTPS_PROXY")
+        and not os.environ.get("http_proxy")
+        and not os.environ.get("https_proxy")
+        and sys.platform.startswith("win")
+    ):
+        try:
+            from .winproxy import get_windows_proxy_settings
+
+            s = get_windows_proxy_settings()
+            if s is not None:
+                if s.http_proxy:
+                    os.environ["HTTP_PROXY"] = s.http_proxy
+                    os.environ["http_proxy"] = s.http_proxy
+                if s.https_proxy:
+                    os.environ["HTTPS_PROXY"] = s.https_proxy
+                    os.environ["https_proxy"] = s.https_proxy
+        except Exception:
+            pass
+
+    # ---- geo resolution (identical to run_once) ----
+    geo = None
+    if cfg.auto_location:
+        try:
+            geo = get_location_from_ip(timeout_s=float(cfg.network.timeout_s))
+        except Exception as exc:
+            geo = None
+            print(
+                "[global-background] auto_location failed; falling back to configured location. "
+                f"Reason: {exc!r}",
+                file=sys.stderr,
+            )
+    if geo is not None:
+        lat, lon = geo.lat, geo.lon
+        place_name = geo.name or cfg.location.name
+        cc = getattr(geo, "country_code", None)
+        cn = getattr(geo, "country_name", None)
+    else:
+        lat, lon = cfg.location.lat, cfg.location.lon
+        place_name = cfg.location.name
+        cc = None
+        cn = None
+
+    # ---- fetch image ----
+    result = fetch_best_available(
+        cfg,
+        lat,
+        lon,
+        country_code=cc,
+        country_name=cn,
+        target_utc=target_utc,
+    )
+
+    # ---- optional overlay ----
+    if cfg.overlay.enabled and Image is not None and apply_overlay is not None and OverlaySpec is not None:
+        try:
+            img = Image.open(BytesIO(result.image_bytes))
+            img.load()
+            text = cfg.overlay.text_template.format(
+                layer=result.layer,
+                date=result.date.isoformat(),
+                lat=lat,
+                lon=lon,
+                name=place_name or "",
+            )
+            img2 = apply_overlay(
+                img,
+                OverlaySpec(
+                    text=text,
+                    position=cfg.overlay.position,
+                    margin_px=cfg.overlay.margin_px,
+                    font_size_px=cfg.overlay.font_size_px,
+                    fill_rgba=cfg.overlay.fill_rgba,
+                    stroke_rgba=cfg.overlay.stroke_rgba,
+                    stroke_width_px=cfg.overlay.stroke_width_px,
+                ),
+            )
+            buf = BytesIO()
+            if cfg.image.format in {"jpg", "jpeg"}:
+                img2.convert("RGB").save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+                result = FetchResult(result.layer, result.date, buf.getvalue(), ".jpg")
+            else:
+                img2.convert("RGBA").save(buf, format="PNG", optimize=True)
+                result = FetchResult(result.layer, result.date, buf.getvalue(), ".png")
+        except Exception:
+            pass
+
+    # ---- format conversion: PNG → JPG if configured ----
+    if result.content_ext == ".png" and cfg.image.format in {"jpg", "jpeg"} and Image is not None:
+        try:
+            img = Image.open(BytesIO(result.image_bytes))
+            img.load()
+            buf = BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+            result = FetchResult(result.layer, result.date, buf.getvalue(), ".jpg")
+        except Exception:
+            pass
+
+    # ---- save to hourly ring-buffer slot ----
+    slot = target_utc.astimezone(dt.timezone.utc).hour
+    hourly_dir = Path(cfg.output_dir) / "hourly"
+    hourly_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write via temp file then atomic rename to avoid the player reading partial data.
+    image_slot = hourly_dir / f"h{slot:02d}{result.content_ext}"
+    tmp_img = hourly_dir / f"h{slot:02d}{result.content_ext}.tmp"
+    tmp_img.write_bytes(result.image_bytes)
+    tmp_img.replace(image_slot)
+
+    # Also remove any stale slot with a different extension (e.g. leftover .png when now .jpg).
+    for stale_ext in (".jpg", ".png"):
+        if stale_ext != result.content_ext:
+            stale = hourly_dir / f"h{slot:02d}{stale_ext}"
+            stale.unlink(missing_ok=True)
+
+    bmp_slot: Path | None = None
+    if Image is not None:
+        try:
+            img = Image.open(BytesIO(result.image_bytes))
+            img.load()
+            bmp_slot = hourly_dir / f"h{slot:02d}.bmp"
+            tmp_bmp = hourly_dir / f"h{slot:02d}.bmp.tmp"
+            img.convert("RGB").save(tmp_bmp, format="BMP")
+            tmp_bmp.replace(bmp_slot)
+        except Exception:
+            bmp_slot = None
+
+    print(
+        f"[global-background] Saved hourly slot h{slot:02d} → {image_slot}",
+        file=sys.stderr,
+    )
+    return image_slot, bmp_slot
+
+
+def run_frame_slot(
+    cfg: AppConfig,
+    target_utc: dt.datetime,
+    *,
+    dry_run: bool = False,
+) -> tuple[Path, Path | None]:
+    """Download the current satellite image and save it to the 15-min ring buffer.
+
+    Slot index = (hour * 60 + minute) // frame_interval_min  (e.g. 0–95 for 15-min).
+    Files: ``{output_dir}/frames/f{idx:04d}.{ext}``  e.g. ``f0057.jpg``
+
+    ``target_utc`` determines *which slot* to overwrite; the image content is
+    always the provider's latest frame (FY-4 has no historical API).
+    """
+    # ---- proxy setup ----
+    if cfg.network.https_proxy:
+        os.environ["HTTPS_PROXY"] = cfg.network.https_proxy
+        os.environ["https_proxy"] = cfg.network.https_proxy
+    if cfg.network.http_proxy:
+        os.environ["HTTP_PROXY"] = cfg.network.http_proxy
+        os.environ["http_proxy"] = cfg.network.http_proxy
+    if (
+        not cfg.network.http_proxy
+        and not cfg.network.https_proxy
+        and not os.environ.get("HTTP_PROXY")
+        and not os.environ.get("HTTPS_PROXY")
+        and not os.environ.get("http_proxy")
+        and not os.environ.get("https_proxy")
+        and sys.platform.startswith("win")
+    ):
+        try:
+            from .winproxy import get_windows_proxy_settings
+
+            s = get_windows_proxy_settings()
+            if s is not None:
+                if s.http_proxy:
+                    os.environ["HTTP_PROXY"] = s.http_proxy
+                    os.environ["http_proxy"] = s.http_proxy
+                if s.https_proxy:
+                    os.environ["HTTPS_PROXY"] = s.https_proxy
+                    os.environ["https_proxy"] = s.https_proxy
+        except Exception:
+            pass
+
+    # ---- geo resolution ----
+    geo = None
+    if cfg.auto_location:
+        try:
+            geo = get_location_from_ip(timeout_s=float(cfg.network.timeout_s))
+        except Exception as exc:
+            geo = None
+            print(
+                "[global-background] auto_location failed; falling back to configured location. "
+                f"Reason: {exc!r}",
+                file=sys.stderr,
+            )
+    if geo is not None:
+        lat, lon = geo.lat, geo.lon
+        place_name = geo.name or cfg.location.name
+        cc = getattr(geo, "country_code", None)
+        cn = getattr(geo, "country_name", None)
+    else:
+        lat, lon = cfg.location.lat, cfg.location.lon
+        place_name = cfg.location.name
+        cc = None
+        cn = None
+
+    # ---- fetch image ----
+    # Always pass target_utc=None: FY-4 and similar providers have no historical API.
+    result = fetch_best_available(
+        cfg,
+        lat,
+        lon,
+        country_code=cc,
+        country_name=cn,
+        target_utc=None,
+    )
+
+    # ---- optional overlay ----
+    if cfg.overlay.enabled and Image is not None and apply_overlay is not None and OverlaySpec is not None:
+        try:
+            img = Image.open(BytesIO(result.image_bytes))
+            img.load()
+            text = cfg.overlay.text_template.format(
+                layer=result.layer,
+                date=result.date.isoformat(),
+                lat=lat,
+                lon=lon,
+                name=place_name or "",
+            )
+            img2 = apply_overlay(
+                img,
+                OverlaySpec(
+                    text=text,
+                    position=cfg.overlay.position,
+                    margin_px=cfg.overlay.margin_px,
+                    font_size_px=cfg.overlay.font_size_px,
+                    fill_rgba=cfg.overlay.fill_rgba,
+                    stroke_rgba=cfg.overlay.stroke_rgba,
+                    stroke_width_px=cfg.overlay.stroke_width_px,
+                ),
+            )
+            buf = BytesIO()
+            if cfg.image.format in {"jpg", "jpeg"}:
+                img2.convert("RGB").save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+                result = FetchResult(result.layer, result.date, buf.getvalue(), ".jpg")
+            else:
+                img2.convert("RGBA").save(buf, format="PNG", optimize=True)
+                result = FetchResult(result.layer, result.date, buf.getvalue(), ".png")
+        except Exception:
+            pass
+
+    # ---- format conversion: PNG → JPG if configured ----
+    if result.content_ext == ".png" and cfg.image.format in {"jpg", "jpeg"} and Image is not None:
+        try:
+            img = Image.open(BytesIO(result.image_bytes))
+            img.load()
+            buf = BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=cfg.image.quality, optimize=True)
+            result = FetchResult(result.layer, result.date, buf.getvalue(), ".jpg")
+        except Exception:
+            pass
+
+    # ---- compute slot index and save ----
+    slot_utc = target_utc.astimezone(dt.timezone.utc)
+    interval_min = max(1, int(getattr(cfg.slideshow, "frame_interval_min", 15)))
+    idx = (slot_utc.hour * 60 + slot_utc.minute) // interval_min  # 0..slots_per_day-1
+
+    frames_dir = Path(cfg.output_dir) / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    image_slot = frames_dir / f"f{idx:04d}{result.content_ext}"
+    tmp_img = frames_dir / f"f{idx:04d}{result.content_ext}.tmp"
+    tmp_img.write_bytes(result.image_bytes)
+    tmp_img.replace(image_slot)
+
+    for stale_ext in (".jpg", ".png"):
+        if stale_ext != result.content_ext:
+            (frames_dir / f"f{idx:04d}{stale_ext}").unlink(missing_ok=True)
+
+    bmp_slot: Path | None = None
+    if Image is not None:
+        try:
+            img = Image.open(BytesIO(result.image_bytes))
+            img.load()
+            bmp_slot = frames_dir / f"f{idx:04d}.bmp"
+            tmp_bmp = frames_dir / f"f{idx:04d}.bmp.tmp"
+            img.convert("RGB").save(tmp_bmp, format="BMP")
+            tmp_bmp.replace(bmp_slot)
+        except Exception:
+            bmp_slot = None
+
+    print(
+        f"[global-background] Saved frame slot f{idx:04d} ({slot_utc.strftime('%H:%M')} UTC) → {image_slot}",
+        file=sys.stderr,
+    )
+    return image_slot, bmp_slot

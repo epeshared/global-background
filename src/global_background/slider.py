@@ -79,6 +79,37 @@ def fetch_latest_timestamp_utc(req: SliderFullDiskRequest, *, timeout_s: float =
     return _parse_timestamp_int(int(ts[0]))
 
 
+def fetch_all_timestamps(req: SliderFullDiskRequest, *, timeout_s: float = 30.0) -> list[dt.datetime]:
+    """Return all available SLIDER timestamps (newest first)."""
+    data = _download_json(_latest_times_url(req), timeout_s=timeout_s)
+    ts_list = data.get("timestamps_int")
+    if not isinstance(ts_list, list) or not ts_list:
+        raise RuntimeError(f"SLIDER latest_times.json missing timestamps_int: {data!r}")
+    return [_parse_timestamp_int(int(t)) for t in ts_list]
+
+
+def _pick_timestamp_for_slot(timestamps: list[dt.datetime], target_utc: dt.datetime) -> dt.datetime:
+    """Pick the best available SLIDER timestamp for a given target UTC hour.
+
+    Only returns a timestamp if one exists within the target UTC hour.
+    Raises RuntimeError otherwise so callers can skip the slot rather than
+    reusing a stale timestamp from a different hour (which would produce
+    duplicate images in the ring buffer).
+    """
+    utc = target_utc.astimezone(dt.timezone.utc)
+    hour_start = utc.replace(minute=0, second=0, microsecond=0)
+    hour_end = hour_start + dt.timedelta(hours=1)
+
+    in_hour = [t for t in timestamps if hour_start <= t < hour_end]
+    if in_hour:
+        return max(in_hour)  # most recent frame within that hour
+
+    raise RuntimeError(
+        f"No SLIDER frame available for {hour_start.strftime('%Y-%m-%d %H:xx UTC')}. "
+        f"Available range: {min(timestamps).strftime('%H:%M')}–{max(timestamps).strftime('%H:%M')} UTC."
+    )
+
+
 def _tile_url(*, req: SliderFullDiskRequest, ts_utc: dt.datetime, level: int, x: int, y: int) -> str:
     ts_utc = ts_utc.astimezone(dt.timezone.utc)
     stamp = ts_utc.strftime("%Y%m%d%H%M%S")
@@ -202,13 +233,21 @@ def fetch_latest_full_disk_png(
     *,
     timeout_s: float = 30.0,
     target_max_dim_px: int = 3840,
+    target_utc: dt.datetime | None = None,
 ) -> tuple[bytes, dt.datetime, str]:
-    """Fetch the latest SLIDER full-disk frame as a stitched PNG.
+    """Fetch the latest (or a historical) SLIDER full-disk frame as a stitched PNG.
+
+    If *target_utc* is given, the frame whose UTC hour best matches is returned,
+    enabling 24-hour ring-buffer backfilling.
 
     Returns: (png_bytes, timestamp_utc, sample_url)
     """
 
-    ts_utc = fetch_latest_timestamp_utc(req, timeout_s=timeout_s)
+    if target_utc is not None:
+        all_ts = fetch_all_timestamps(req, timeout_s=timeout_s)
+        ts_utc = _pick_timestamp_for_slot(all_ts, target_utc)
+    else:
+        ts_utc = fetch_latest_timestamp_utc(req, timeout_s=timeout_s)
 
     # Without Pillow we can't stitch tiles; force level=0 (single tile).
     if Image is None:

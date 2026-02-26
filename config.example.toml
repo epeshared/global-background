@@ -37,6 +37,14 @@ globe_background_stars = false
 [retention]
 keep_days = 1
 
+# 24-hour animated wallpaper ("loop" command)
+# play_interval_s: how many seconds each hourly frame is shown as wallpaper.
+# play_interval_s: seconds each frame is shown during the slideshow.
+# frame_interval_min: download a fresh frame every N minutes (clock-aligned, must divide 60).
+[slideshow]
+play_interval_s = 1
+frame_interval_min = 15
+
 [location]
 name = "Shanghai"
 lat = 31.2304

@@ -82,6 +82,16 @@ class RetentionConfig:
 
 
 @dataclass(frozen=True)
+class SlideshowConfig:
+    """Configuration for the 15-min animated-wallpaper loop mode."""
+
+    # How many seconds each frame is shown as wallpaper.
+    play_interval_s: int
+    # Download a new frame every N minutes, aligned to clock boundaries (e.g. :00/:15/:30/:45).
+    frame_interval_min: int
+
+
+@dataclass(frozen=True)
 class NetworkConfig:
     https_proxy: str | None
     http_proxy: str | None
@@ -119,6 +129,7 @@ class AppConfig:
     satellite: SatelliteConfig
     wallpaper: WallpaperConfig
     overlay: OverlayConfig
+    slideshow: SlideshowConfig
 
 
 def _require(mapping: dict[str, Any], key: str) -> Any:
@@ -455,6 +466,18 @@ def load_config(path: Path) -> AppConfig:
         stroke_width_px=_as_int(ov_raw.get("stroke_width_px", 3), "overlay.stroke_width_px"),
     )
 
+    ss_raw = raw.get("slideshow") or {}
+    if not isinstance(ss_raw, dict):
+        raise ValueError("slideshow must be a mapping")
+    slideshow = SlideshowConfig(
+        play_interval_s=_as_int(ss_raw.get("play_interval_s", 1), "slideshow.play_interval_s"),
+        frame_interval_min=_as_int(ss_raw.get("frame_interval_min", 15), "slideshow.frame_interval_min"),
+    )
+    if slideshow.play_interval_s < 1:
+        raise ValueError("slideshow.play_interval_s must be >= 1")
+    if slideshow.frame_interval_min not in {1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60}:
+        raise ValueError("slideshow.frame_interval_min must be a divisor of 60 (e.g. 15, 30, 60)")
+
     return AppConfig(
         update_interval_minutes=update_interval_minutes,
         output_dir=output_dir,
@@ -468,4 +491,5 @@ def load_config(path: Path) -> AppConfig:
         satellite=satellite,
         wallpaper=wallpaper,
         overlay=overlay,
+        slideshow=slideshow,
     )

@@ -49,11 +49,15 @@ def fetch_latest_full_disk_png(
     timeout_s: float = 30.0,
     max_lookback_minutes: int = 240,
     step_minutes: int = 10,
+    target_utc: dt.datetime | None = None,
 ) -> tuple[bytes, dt.datetime, str]:
     """Fetch the latest available Himawari full-disk PNG.
 
     Himawari URLs are time-stamped and don't always provide a stable "latest" endpoint.
     We probe by stepping backwards in time (UTC) until we find an existing frame.
+
+    If *target_utc* is given, probing starts from that time instead of now().
+    This allows fetching historical frames (e.g. for the 24-hour slideshow backfill).
 
     Returns: (png_bytes, timestamp_utc, url)
     """
@@ -63,10 +67,10 @@ def fetch_latest_full_disk_png(
     if max_lookback_minutes < 0:
         raise ValueError("max_lookback_minutes must be >= 0")
 
-    now = dt.datetime.now(dt.timezone.utc)
+    base = target_utc.astimezone(dt.timezone.utc) if target_utc is not None else dt.datetime.now(dt.timezone.utc)
     # Round down to step
-    minute = (now.minute // step_minutes) * step_minutes
-    cursor = now.replace(minute=minute, second=0, microsecond=0)
+    minute = (base.minute // step_minutes) * step_minutes
+    cursor = base.replace(minute=minute, second=0, microsecond=0)
 
     tries = max(1, (max_lookback_minutes // step_minutes) + 1)
     last_exc: Exception | None = None

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  global-background-loop launchd agent template.
+  Placeholders are replaced by install-loop.sh:
+    __PYTHON_EXE__   → path to python3
+    __CONFIG_PATH__  → absolute path to config.toml
+    __SRC_PATH__     → absolute path to src/
+    __WORK_DIR__     → project root
+    __LOG_DIR__      → logs directory
+
+  This agent runs the 'loop' command which:
+    • Backfills up to 24 hourly satellite images on startup.
+    • Downloads a new frame at every UTC top-of-hour.
+    • Cycles through the 24 frames as a wallpaper slideshow.
+
+  Unlike the hourly 'once' agent, this is a long-running process
+  (KeepAlive=true, no StartInterval).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.global-background-loop</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_EXE__</string>
+        <string>-m</string>
+        <string>global_background</string>
+        <string>loop</string>
+        <string>--config</string>
+        <string>__CONFIG_PATH__</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>__SRC_PATH__</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__WORK_DIR__</string>
+
+    <!-- Start immediately when the agent is loaded / at login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Keep the process alive: restart it if it crashes or exits unexpectedly -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle rapid restarts to avoid spinning endlessly on hard errors -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- Logging (stdout and stderr go to the same rolling log file) -->
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/loop.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/loop.log</string>
+</dict>
+</plist>
